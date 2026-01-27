@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uuid
 from agent import run_agent
@@ -25,9 +26,20 @@ def read_root():
 @app.post("/chat")
 def chat(req: ChatRequest):
     thread_id = req.thread_id or str(uuid.uuid4())
-    response = run_agent(req.message, thread_id)
-
-    return {
-        "thread_id": thread_id,
-        "response": response
-    }
+    
+    async def event_stream():
+        yield f"data: {json.dumps({'thread_id': thread_id, 'type': 'start'})}\n\n"
+        
+        for chunk in run_agent(req.message, thread_id):
+            yield f"data: {json.dumps({'chunk': chunk, 'type': 'content'})}\n\n"
+        
+        yield f"data: {json.dumps({'type': 'end'})}\n\n"
+    
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
+    )
