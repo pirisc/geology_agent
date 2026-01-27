@@ -121,29 +121,19 @@ graph_builder.set_entry_point("chatbot")
 graph = graph_builder.compile(checkpointer=MemorySaver())
 
 # MAIN ENTRY FUNCTION
-# MAIN ENTRY FUNCTION 
 def run_agent(user_input: str, thread_id: str):
-    print("RUN_AGENT CALLED")
-    
-    # Use astream_events for token-by-token streaming
-    for chunk in graph.stream(
+    events = graph.stream(
         {
             "messages": [
                 ("system", SYSTEM_PROMPT),
                 ("user", user_input)
             ]
         },
-        config={"configurable": {"thread_id": thread_id}},
-        stream_mode="messages"  # Stream messages as they arrive
-    ):
-        # chunk is a tuple of (message, metadata)
-        if isinstance(chunk, tuple):
-            message, metadata = chunk
-        else:
-            message = chunk
-            
-        # Only yield AI messages with content
-        if hasattr(message, 'content') and message.content:
-            if hasattr(message, 'type') and message.type == 'ai':
-                # Yield the content
-                yield message.content
+        config={"configurable": {"thread_id": thread_id}}
+    )
+
+    for event in events:
+        for value in event.values():
+            msg = value["messages"][-1]
+            if msg.content:
+                return msg.content
