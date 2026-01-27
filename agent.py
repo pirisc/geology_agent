@@ -121,9 +121,12 @@ graph_builder.set_entry_point("chatbot")
 graph = graph_builder.compile(checkpointer=MemorySaver())
 
 # MAIN ENTRY FUNCTION
+# MAIN ENTRY FUNCTION 
 def run_agent(user_input: str, thread_id: str):
     print("RUN_AGENT CALLED")
-    events = graph.stream(
+    
+    # Use astream_events for token-by-token streaming
+    for chunk in graph.stream(
         {
             "messages": [
                 ("system", SYSTEM_PROMPT),
@@ -131,18 +134,16 @@ def run_agent(user_input: str, thread_id: str):
             ]
         },
         config={"configurable": {"thread_id": thread_id}},
-        stream_mode="values"
-    )
-
-    for event in events:
-        print("EVENT:", event)
-        # Get the last message from the event
-        if "messages" in event and len(event["messages"]) > 0:
-            msg = event["messages"][-1]
-            print("MSG:", msg)
+        stream_mode="messages"  # Stream messages as they arrive
+    ):
+        # chunk is a tuple of (message, metadata)
+        if isinstance(chunk, tuple):
+            message, metadata = chunk
+        else:
+            message = chunk
             
-            # Yield content if it's from the assistant
-            if hasattr(msg, "content") and msg.content:
-                # Check if this is an AI message (not system or user)
-                if hasattr(msg, "type") and msg.type == "ai":
-                    yield msg.content
+        # Only yield AI messages with content
+        if hasattr(message, 'content') and message.content:
+            if hasattr(message, 'type') and message.type == 'ai':
+                # Yield the content
+                yield message.content
