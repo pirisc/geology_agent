@@ -110,6 +110,7 @@ graph = graph_builder.compile(checkpointer=MemorySaver())
 
 # MAIN ENTRY FUNCTION
 def run_agent(user_input: str, thread_id: str):
+    print("RUN_AGENT CALLED")
     events = graph.stream(
         {
             "messages": [
@@ -120,8 +121,14 @@ def run_agent(user_input: str, thread_id: str):
         config={"configurable": {"thread_id": thread_id}}
     )
 
+    last_message = None
+
     for event in events:
+        print("EVENT:", event)
         for value in event.values():
             msg = value["messages"][-1]
-            if msg.content:
-                return msg.content
+            print("MSG:", msg)
+            if hasattr(msg, "content") and msg.content:
+                last_message = msg.content
+
+    return last_message
