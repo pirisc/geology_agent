@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 import uuid
 from agent import run_agent
@@ -24,19 +24,27 @@ def read_root():
     return {"message": "Chat API is running"}
 
 @app.post("/chat")
-def chat(req: ChatRequest):
+async def chat(req: ChatRequest):  # Make this async
     thread_id = req.thread_id or str(uuid.uuid4())
     
     try:
-        # Collect all chunks from the generator
-        response_text = ""
-        for chunk in run_agent(req.message, thread_id):
-            response_text += chunk
+        # Create async generator that yields formatted chunks
+        async def generate():
+            # Send thread_id first as a special message
+            yield f"data: {{'thread_id': '{thread_id}'}}\n\n"
+            
+            # Then stream the tokens
+            async for chunk in run_agent(req.message, thread_id):
+                # Format as SSE (Server-Sent Events)
+                yield f"data: {{'content': '{chunk}'}}\n\n"
+            
+            # Signal completion
+            yield "data: [DONE]\n\n"
         
-        return {
-            "response": response_text,
-            "thread_id": thread_id
-        }
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream"
+        )
         
     except Exception as e:
         print(f"Error: {e}")
