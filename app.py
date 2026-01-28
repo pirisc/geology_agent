@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uuid
+import json
 from agent import run_agent
 
 app = FastAPI()
@@ -29,25 +30,30 @@ async def chat(req: ChatRequest):
     
     try:
         async def generate():
-            # Send thread_id first
-            yield f"data: {{'thread_id': '{thread_id}'}}\n\n"
+            # Send thread_id first - use proper JSON
+            yield f"data: {json.dumps({'thread_id': thread_id})}\n\n"
             
             # Stream tokens
             async for chunk in run_agent(req.message, thread_id):
-                # Escape single quotes in chunk
-                escaped_chunk = chunk.replace("'", "\\'").replace("\n", "\\n")
-                yield f"data: {{'content': '{escaped_chunk}'}}\n\n"
+                # Use proper JSON encoding
+                yield f"data: {json.dumps({'content': chunk})}\n\n"
             
             # Signal completion
             yield "data: [DONE]\n\n"
         
         return StreamingResponse(
             generate(),
-            media_type="text/event-stream"
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no"
+            }
         )
         
     except Exception as e:
         print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
         return JSONResponse(
             status_code=500,
             content={"error": str(e)}
