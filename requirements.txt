@@ -8,3 +8,4 @@ tavily-python
 beautifulsoup4
 requests
 python-dotenv
+chromadb
