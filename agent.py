@@ -1,10 +1,13 @@
 from typing import TypedDict, Annotated
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain.tools import tool
+from bs4 import BeautifulSoup 
+import requests
 
 
 # API KEYS
@@ -48,6 +51,29 @@ SCIENTIFIC APPROACH
 - If information is uncertain or outside your knowledge, say so explicitly.
 - For ambiguous questions, state your assumptions or ask for clarification.
 
+-------------------------------
+PROACTIVE ENGAGEMENT & QUESTIONS
+-------------------------------
+After answering the user's question, enrich the conversation by:
+
+- Asking 1-2 relevant follow-up questions that deepen understanding of the topic.
+- Connecting to related geological concepts they might find interesting.
+- Exploring the "why" or "how" behind the phenomena discussed.
+- Inquiring about their specific context (e.g., location, academic level, project goals) 
+  when it would help tailor future responses.
+- Suggesting related topics worth exploring based on their interests.
+
+Examples of good follow-up questions:
+- "Are you interested in how this process varies in different tectonic settings?"
+- "Would you like to know how geologists actually measure this in the field?"
+- "Is this for a specific region or project you're working on?"
+- "Have you encountered [related concept] before? It's closely connected to this."
+- "What sparked your interest in this particular aspect of geology?"
+
+Keep follow-ups natural and conversational—limit to 1-2 questions per response 
+to avoid overwhelming the user. Prioritize questions that enhance their understanding 
+or help you provide better-tailored information.
+
 ----------------
 SAFETY GUIDELINES
 ----------------
@@ -87,13 +113,40 @@ INTERACTION STYLE
 - If a question falls outside geology, briefly acknowledge and optionally redirect.
 
 Your primary goal is to help users understand Earth science deeply, accurately, 
-and safely.
+and safely—while fostering curiosity through thoughtful questions.
 """
 
 
 # TOOLS
-tool = TavilySearchResults(max_results=3)
-tools = [tool]
+# Tool 1
+tavily_search = TavilySearchResults(max_results=5)
+
+# Tool 2
+@tool
+def web_scraper_tool(url:str):
+    """
+    Scrapes a webpage and returns text contents from it.
+    Useful for provinding context to the agent, for when the user provides a URL or to read a specific page.
+    """
+
+    try:
+        content = requests.get(url, timeout= 10)
+        soup = BeautifulSoup(content.text, "html.parser")
+
+        for script in soup(["script", "style"]):
+            script.decompose() # removes script and style elements
+        
+        text = soup.get_text()
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split(" ") )
+        clean_text = "\n".join(chunk for chunk in chunks if chunk)
+
+        return clean_text[:2000] # to not overwhelme the model
+
+    except Exception as e:
+        return f"Error scraping {url}: {str(e)}"
+
+tools = [tavily_search,web_scraper_tool]
 
 # STATE
 class State(TypedDict):
@@ -108,8 +161,6 @@ llm = ChatOpenAI(
     streaming=True
 ).bind_tools(tools=tools)
 
-# Define your system prompt
-SYSTEM_PROMPT = "You are a helpful geology assistant..."
 
 def chatbot(state: State):
     return {"messages": [llm.invoke(state["messages"])]}
@@ -124,7 +175,7 @@ graph = graph_builder.compile(checkpointer=MemorySaver())
 
 # MAIN ENTRY FUNCTION
 async def run_agent(user_input: str, thread_id: str):
-    """Stream tokens as they're generated"""
+    """Stream tokens as they are generated"""
     
     async for event in graph.astream_events(
         {
