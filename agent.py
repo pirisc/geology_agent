@@ -6,8 +6,12 @@ from langgraph.checkpoint.memory import MemorySaver
 from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain.tools import tool
+from langchain_community.vectorstores import Chroma
+from langchain_openai import OpenAIEmbeddings
 from bs4 import BeautifulSoup 
 import requests
+from datetime import datetime
+
 
 
 # API KEYS
@@ -27,6 +31,51 @@ engineering geology and resource exploration.
 Your purpose is to make geological science accessible, accurate, and engaging—
 whether explaining plate tectonics to a curious student or discussing stable 
 isotope geochemistry with a researcher.
+
+═════════════════════════════════════════════════════════════════════════
+MEMORY & PERSONALIZATION SYSTEM - CRITICAL INSTRUCTIONS
+═══════════════════════════════════════════════════════════════════════════
+
+You have ONE memory system that you MUST use actively:
+
+1. GEOLOGICAL KNOWLEDGE BASE (geology_kb):
+   - Contains facts about minerals, rocks, formations, processes
+   - Check FIRST before searching the web
+   - Save important geological information you learn
+
+──────────────────────────────────────────────────────────────────────
+MANDATORY WORKFLOW FOR EVERY QUERY:
+─────────────────────────────────────────────────────────────────────────
+
+STEP 1: CHECK KNOWLEDGE BASE
+   → Call search_geology_knowledge(query) for the topic
+   → If found, use that information
+   → If not found, proceed to Step 3
+
+STEP 2: SEARCH WEB (if needed)
+   → Only if knowledge base didn't have the answer
+   → Call tavily_search or web_scraper_tool
+
+STEP 3: SAVE WHAT YOU LEARNED
+   → Call save_geology_fact() for important geological information
+
+──────────────────────────────────────────────────────────────────────
+WHAT TO SAVE TO KNOWLEDGE BASE:
+─────────────────────────────────────────────────────────────────────────
+
+Save geological facts that are:
+✓ Mineral properties (formula, hardness, crystal system, color)
+✓ Rock characteristics and formation processes
+✓ Geological formations and their significance
+✓ Important geological processes or concepts
+✓ Location-specific geology
+
+Examples:
+- save_geology_fact("Quartz: SiO2, Mohs hardness 7, hexagonal crystal system", "mineral")
+- save_geology_fact("Granite: coarse-grained igneous rock with quartz, feldspar, mica", "rock")
+- save_geology_fact("Subduction zones form where oceanic plate descends beneath another plate", "process")
+
+═════════════════════════════════════════════════════════════════════════
 
 --------------------
 FORMATTING GUIDELINES
@@ -116,12 +165,22 @@ Your primary goal is to help users understand Earth science deeply, accurately,
 and safely—while fostering curiosity through thoughtful questions.
 """
 
+# MEMORY
+embeddings = OpenAIEmbeddings()
+
+# Geological facts
+geology_facts = Chroma(
+    collection_name="geological_facts",
+    embedding_function= embeddings,
+    persist_directory= "./geology_facts"
+)
+
 
 # TOOLS
-# Tool 1
+# Tool 1: Web Search with Tavily
 tavily_search = TavilySearchResults(max_results=5)
 
-# Tool 2
+# Tool 2: Web scraper
 @tool
 def web_scraper_tool(url:str):
     """
@@ -146,7 +205,57 @@ def web_scraper_tool(url:str):
     except Exception as e:
         return f"Error scraping {url}: {str(e)}"
 
-tools = [tavily_search,web_scraper_tool]
+# Tool 3: Search Geology Knowledge
+@tool
+def search_geology_knowledge(query: str):
+    """
+    Search the geology knowledge base for information about minerals, rocks, geological processes,
+    or conceptes that have been saved from before.
+    Use this BEFORE searching the web to see if there are information already known. 
+    """
+    try:
+        results = geology_facts.similarity_search(query, k=5)
+        
+        formatted_results = []
+        for i, doc in enumerate(results, 1):
+            category = doc.metadata.get("category", "general")
+            saved_at = doc.metadata.get("saved_at", "unknown date")
+            formatted_results.append(
+                f"[{category.upper()}] {doc.page_content}\n(Saved: {saved_at})"
+            )
+        return "\n\n".join(formatted_results)
+    
+    except Exception as e:
+        return f"Error searching knowledge base: {str(e)}"
+
+
+#Tool 4: Save Geology facts
+@tool
+def save_geology_fact(fact:str):
+    """
+    Save important geological inforation to the knowledge base for future references.
+
+    Use this when:
+        - Learning new geological facts worth remembering
+        - User shares information about rocks, minerals or locations
+        - Discovering interesting geological processes or concepts
+
+    """
+    try:
+        geology_facts.aadd_texts(
+            texts = [fact],
+            metadatas=[{
+                "saved_at" : datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+            }]
+        )
+        return f"Saved to the geology knowledge base"
+    
+    except Exception as e:
+        return f"Error saving to knowledge base: {str(e)}"
+    
+
+
+tools = [tavily_search,web_scraper_tool, search_geology_knowledge]
 
 # STATE
 class State(TypedDict):
