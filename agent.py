@@ -12,12 +12,9 @@ from bs4 import BeautifulSoup
 import requests
 from datetime import datetime
 
-
-
 # API KEYS
 from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv(), override = True)
-
+load_dotenv(find_dotenv(), override=True)
 
 # SYSTEM PROMPT
 SYSTEM_PROMPT = """
@@ -50,14 +47,20 @@ MANDATORY WORKFLOW FOR EVERY QUERY:
 STEP 1: CHECK KNOWLEDGE BASE
    → Call search_geology_knowledge(query) for the topic
    → If found, use that information
-   → If not found, proceed to Step 3
+   → If not found, proceed to Step 2
 
 STEP 2: SEARCH WEB (if needed)
    → Only if knowledge base didn't have the answer
    → Call tavily_search or web_scraper_tool
 
-STEP 3: SAVE WHAT YOU LEARNED
+STEP 3: SAVE WHAT YOU LEARNED (OPTIONAL)
    → Call save_geology_fact() for important geological information
+   → This is optional - use your judgment
+
+STEP 4: RESPOND TO THE USER (MANDATORY!)
+   → After using tools, you MUST provide a natural language answer
+   → Never end without responding to the user's question
+   → Synthesize information from tools into a clear response
 
 ──────────────────────────────────────────────────────────────────────
 WHAT TO SAVE TO KNOWLEDGE BASE:
@@ -171,10 +174,9 @@ embeddings = OpenAIEmbeddings()
 # Geological facts
 geology_facts = Chroma(
     collection_name="geological_facts",
-    embedding_function= embeddings,
-    persist_directory= "./geology_facts"
+    embedding_function=embeddings,
+    persist_directory="./geology_facts"
 )
-
 
 # TOOLS
 # Tool 1: Web Search with Tavily
@@ -182,39 +184,45 @@ tavily_search = TavilySearchResults(max_results=5)
 
 # Tool 2: Web scraper
 @tool
-def web_scraper_tool(url:str):
+def web_scraper_tool(url: str) -> str:
     """
     Scrapes a webpage and returns text contents from it.
-    Useful for provinding context to the agent, for when the user provides a URL or to read a specific page.
+    Useful for providing context to the agent, for when the user provides a URL or to read a specific page.
     """
-
     try:
-        content = requests.get(url, timeout= 10)
+        content = requests.get(
+            url, 
+            timeout=10,
+            headers={'User-Agent': 'Mozilla/5.0'}
+        )
         soup = BeautifulSoup(content.text, "html.parser")
 
         for script in soup(["script", "style"]):
-            script.decompose() # removes script and style elements
+            script.decompose()
         
         text = soup.get_text()
         lines = (line.strip() for line in text.splitlines())
-        chunks = (phrase.strip() for line in lines for phrase in line.split(" ") )
+        chunks = (phrase.strip() for line in lines for phrase in line.split(" "))
         clean_text = "\n".join(chunk for chunk in chunks if chunk)
 
-        return clean_text[:2000] # to not overwhelme the model
+        return clean_text[:2000]
 
     except Exception as e:
         return f"Error scraping {url}: {str(e)}"
 
 # Tool 3: Search Geology Knowledge
 @tool
-def search_geology_knowledge(query: str):
+def search_geology_knowledge(query: str) -> str:
     """
     Search the geology knowledge base for information about minerals, rocks, geological processes,
-    or conceptes that have been saved from before.
-    Use this BEFORE searching the web to see if there are information already known. 
+    or concepts that have been saved from before.
+    Use this BEFORE searching the web to see if there is information already known.
     """
     try:
         results = geology_facts.similarity_search(query, k=5)
+        
+        if not results:
+            return "No relevant geological information found in knowledge base."
         
         formatted_results = []
         for i, doc in enumerate(results, 1):
@@ -228,34 +236,36 @@ def search_geology_knowledge(query: str):
     except Exception as e:
         return f"Error searching knowledge base: {str(e)}"
 
-
-#Tool 4: Save Geology facts
+# Tool 4: Save Geology facts
 @tool
-def save_geology_fact(fact:str):
+def save_geology_fact(fact: str, category: str = "general") -> str:
     """
-    Save important geological inforation to the knowledge base for future references.
+    Save important geological information to the knowledge base for future references.
 
     Use this when:
         - Learning new geological facts worth remembering
         - User shares information about rocks, minerals or locations
         - Discovering interesting geological processes or concepts
-
+    
+    Categories: mineral, rock, formation, process, location, concept, general
+    
+    IMPORTANT: After saving, continue to answer the user's question!
     """
     try:
-        geology_facts.aadd_texts(
-            texts = [fact],
+        geology_facts.add_texts(  # FIXED: was 'aadd_texts'
+            texts=[fact],
             metadatas=[{
-                "saved_at" : datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+                "category": category,
+                "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }]
         )
-        return f"Saved to the geology knowledge base"
+        return f"✓ Saved to geology knowledge base under '{category}'. Now continue with your response to the user."
     
     except Exception as e:
         return f"Error saving to knowledge base: {str(e)}"
-    
 
-
-tools = [tavily_search,web_scraper_tool, search_geology_knowledge]
+# FIXED: Added save_geology_fact to tools list
+tools = [tavily_search, web_scraper_tool, search_geology_knowledge, save_geology_fact]
 
 # STATE
 class State(TypedDict):
@@ -269,7 +279,6 @@ llm = ChatOpenAI(
     temperature=0.5,
     streaming=True
 ).bind_tools(tools=tools)
-
 
 def chatbot(state: State):
     return {"messages": [llm.invoke(state["messages"])]}
