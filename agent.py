@@ -11,12 +11,31 @@ from langchain_openai import OpenAIEmbeddings
 from bs4 import BeautifulSoup 
 import requests
 from datetime import datetime
+import logging
+import os
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SETUP & CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # API KEYS
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(), override=True)
 
+# Configuration constants
+MAX_INPUT_LENGTH = 10000  # Maximum characters for user input
+WEB_SCRAPER_CHAR_LIMIT = 5000  # Increased from 2000
+WEB_SCRAPER_TIMEOUT = 15  # Increased timeout
+KNOWLEDGE_BASE_SEARCH_RESULTS = 5
+
+# ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM PROMPT
+# ═══════════════════════════════════════════════════════════════════════════
+
 SYSTEM_PROMPT = """
 You are Rocky, an AI assistant specializing in Geology and Earth Sciences.
 
@@ -168,112 +187,210 @@ Your primary goal is to help users understand Earth science deeply, accurately,
 and safely—while fostering curiosity through thoughtful questions.
 """
 
-# MEMORY
-embeddings = OpenAIEmbeddings()
+# ═══════════════════════════════════════════════════════════════════════════
+# MEMORY INITIALIZATION
+# ═══════════════════════════════════════════════════════════════════════════
 
-# Geological facts
-geology_facts = Chroma(
-    collection_name="geological_facts",
-    embedding_function=embeddings,
-    persist_directory="./geology_facts"
-)
+def initialize_knowledge_base():
+    """Initialize the Chroma vector store for geological knowledge."""
+    try:
+        embeddings = OpenAIEmbeddings()
+        
+        # Ensure directory exists
+        persist_dir = "./geology_facts"
+        os.makedirs(persist_dir, exist_ok=True)
+        
+        geology_facts = Chroma(
+            collection_name="geological_facts",
+            embedding_function=embeddings,
+            persist_directory=persist_dir
+        )
+        
+        logger.info("Geological knowledge base initialized successfully")
+        return geology_facts
+    
+    except Exception as e:
+        logger.error(f"Error initializing knowledge base: {str(e)}")
+        raise
 
+# Initialize the knowledge base
+geology_facts = initialize_knowledge_base()
+
+# ═══════════════════════════════════════════════════════════════════════════
 # TOOLS
+# ═══════════════════════════════════════════════════════════════════════════
+
 # Tool 1: Web Search with Tavily
 tavily_search = TavilySearchResults(max_results=5)
 
-# Tool 2: Web scraper
+# Tool 2: Enhanced Web Scraper
 @tool
 def web_scraper_tool(url: str) -> str:
     """
     Scrapes a webpage and returns text contents from it.
-    Useful for providing context to the agent, for when the user provides a URL or to read a specific page.
+    Useful for providing context to the agent, for when the user provides a URL 
+    or to read a specific page.
+    
+    Args:
+        url: The URL to scrape (must be a valid http/https URL)
+    
+    Returns:
+        Cleaned text content from the webpage or error message
     """
+    # Validate URL
+    if not url.startswith(('http://', 'https://')):
+        return f"Invalid URL: {url}. URL must start with http:// or https://"
+    
     try:
-        content = requests.get(
+        response = requests.get(
             url, 
-            timeout=10,
-            headers={'User-Agent': 'Mozilla/5.0'}
+            timeout=WEB_SCRAPER_TIMEOUT,
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
         )
-        soup = BeautifulSoup(content.text, "html.parser")
+        response.raise_for_status()  # Raise exception for bad status codes
+        
+        soup = BeautifulSoup(response.text, "html.parser")
 
-        for script in soup(["script", "style"]):
+        # Remove script and style elements
+        for script in soup(["script", "style", "nav", "footer", "header"]):
             script.decompose()
         
+        # Get text
         text = soup.get_text()
+        
+        # Clean up whitespace
         lines = (line.strip() for line in text.splitlines())
-        chunks = (phrase.strip() for line in lines for phrase in line.split(" "))
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
         clean_text = "\n".join(chunk for chunk in chunks if chunk)
 
-        return clean_text[:2000]
+        # Return with character limit
+        if len(clean_text) > WEB_SCRAPER_CHAR_LIMIT:
+            return clean_text[:WEB_SCRAPER_CHAR_LIMIT] + f"\n\n[Content truncated - showed first {WEB_SCRAPER_CHAR_LIMIT} characters]"
+        
+        return clean_text
 
+    except requests.Timeout:
+        return f"Error: Request timed out after {WEB_SCRAPER_TIMEOUT} seconds for {url}"
+    except requests.RequestException as e:
+        return f"Error fetching {url}: {str(e)}"
     except Exception as e:
-        return f"Error scraping {url}: {str(e)}"
+        logger.error(f"Unexpected error scraping {url}: {str(e)}")
+        return f"Unexpected error scraping {url}: {str(e)}"
 
 # Tool 3: Search Geology Knowledge
 @tool
 def search_geology_knowledge(query: str) -> str:
     """
-    Search the geology knowledge base for information about minerals, rocks, geological processes,
-    or concepts that have been saved from before.
-    Use this BEFORE searching the web to see if there is information already known.
+    Search the geology knowledge base for information about minerals, rocks, 
+    geological processes, or concepts that have been saved before.
+    
+    Use this BEFORE searching the web to see if information is already known.
+    
+    Args:
+        query: Search query for geological information
+    
+    Returns:
+        Formatted results from knowledge base or message if nothing found
     """
     try:
-        results = geology_facts.similarity_search(query, k=5)
+        if not query or not query.strip():
+            return "Error: Empty search query provided"
+        
+        results = geology_facts.similarity_search(
+            query, 
+            k=KNOWLEDGE_BASE_SEARCH_RESULTS
+        )
         
         if not results:
-            return "No relevant geological information found in knowledge base."
+            return "No relevant geological information found in knowledge base. Consider searching the web."
         
         formatted_results = []
         for i, doc in enumerate(results, 1):
             category = doc.metadata.get("category", "general")
             saved_at = doc.metadata.get("saved_at", "unknown date")
             formatted_results.append(
-                f"[{category.upper()}] {doc.page_content}\n(Saved: {saved_at})"
+                f"{i}. [{category.upper()}] {doc.page_content}\n   (Saved: {saved_at})"
             )
-        return "\n\n".join(formatted_results)
+        
+        return "Found in knowledge base:\n\n" + "\n\n".join(formatted_results)
     
     except Exception as e:
+        logger.error(f"Error searching knowledge base: {str(e)}")
         return f"Error searching knowledge base: {str(e)}"
 
-# Tool 4: Save Geology facts
+# Tool 4: Save Geology Facts
 @tool
 def save_geology_fact(fact: str, category: str = "general") -> str:
     """
-    Save important geological information to the knowledge base for future references.
+    Save important geological information to the knowledge base for future reference.
 
     Use this when:
         - Learning new geological facts worth remembering
-        - User shares information about rocks, minerals or locations
+        - User shares information about rocks, minerals, or locations
         - Discovering interesting geological processes or concepts
     
-    Categories: mineral, rock, formation, process, location, concept, general
+    Args:
+        fact: The geological fact to save
+        category: Category of the fact (mineral, rock, formation, process, 
+                  location, concept, general)
+    
+    Returns:
+        Success or error message
     
     IMPORTANT: After saving, continue to answer the user's question!
     """
+    valid_categories = ["mineral", "rock", "formation", "process", 
+                       "location", "concept", "general"]
+    
     try:
-        geology_facts.add_texts(  # FIXED: was 'aadd_texts'
+        if not fact or not fact.strip():
+            return "Error: Cannot save empty fact"
+        
+        # Validate category
+        if category not in valid_categories:
+            category = "general"
+            logger.warning(f"Invalid category provided, using 'general'")
+        
+        # Add to knowledge base
+        geology_facts.add_texts(
             texts=[fact],
             metadatas=[{
                 "category": category,
                 "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }]
         )
-        return f"✓ Saved to geology knowledge base under '{category}'. Now continue with your response to the user."
+        
+        # Persist to disk
+        geology_facts.persist()
+        
+        logger.info(f"Saved geological fact to category '{category}'")
+        return f"✓ Successfully saved to knowledge base under '{category}'"
     
     except Exception as e:
+        logger.error(f"Error saving to knowledge base: {str(e)}")
         return f"Error saving to knowledge base: {str(e)}"
 
-# FIXED: Added save_geology_fact to tools list
-tools = [tavily_search, web_scraper_tool, search_geology_knowledge, save_geology_fact]
+# Tool list
+tools = [
+    tavily_search, 
+    web_scraper_tool, 
+    search_geology_knowledge, 
+    save_geology_fact
+]
 
-# STATE
+# ═══════════════════════════════════════════════════════════════════════════
+# STATE & GRAPH
+# ═══════════════════════════════════════════════════════════════════════════
+
 class State(TypedDict):
     messages: Annotated[list, add_messages]
 
-# GRAPH
+# Build the graph
 graph_builder = StateGraph(State)
 
+# Initialize LLM
 llm = ChatOpenAI(
     model="gpt-4o-mini",
     temperature=0.5,
@@ -281,34 +398,129 @@ llm = ChatOpenAI(
 ).bind_tools(tools=tools)
 
 def chatbot(state: State):
-    return {"messages": [llm.invoke(state["messages"])]}
+    """Main chatbot node that processes messages."""
+    try:
+        return {"messages": [llm.invoke(state["messages"])]}
+    except Exception as e:
+        logger.error(f"Error in chatbot node: {str(e)}")
+        raise
 
+# Add nodes
 graph_builder.add_node("chatbot", chatbot)
 graph_builder.add_node("tools", ToolNode(tools=tools))
+
+# Add edges
 graph_builder.add_conditional_edges("chatbot", tools_condition)
 graph_builder.add_edge("tools", "chatbot")
 graph_builder.set_entry_point("chatbot")
 
+# Compile graph
 graph = graph_builder.compile(checkpointer=MemorySaver())
 
+# ═══════════════════════════════════════════════════════════════════════════
 # MAIN ENTRY FUNCTION
-async def run_agent(user_input: str, thread_id: str):
-    """Stream tokens as they are generated"""
+# ═══════════════════════════════════════════════════════════════════════════
+
+def validate_input(user_input: str) -> tuple[bool, str]:
+    """
+    Validate user input.
     
-    async for event in graph.astream_events(
-        {
-            "messages": [
-                ("system", SYSTEM_PROMPT),
-                ("user", user_input)
-            ]
-        },
-        config={"configurable": {"thread_id": thread_id}},
-        version="v2"
-    ):
-        kind = event["event"]
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    if not user_input:
+        return False, "Error: No input provided"
+    
+    if not user_input.strip():
+        return False, "Error: Input is empty or only whitespace"
+    
+    if len(user_input) > MAX_INPUT_LENGTH:
+        return False, f"Error: Input exceeds maximum length of {MAX_INPUT_LENGTH} characters"
+    
+    return True, ""
+
+async def run_agent(user_input: str, thread_id: str):
+    """
+    Stream tokens as they are generated from the Rocky geology chatbot.
+    
+    Args:
+        user_input: The user's question or message
+        thread_id: Unique identifier for the conversation thread
+    
+    Yields:
+        String tokens as they are generated
+    """
+    # Validate input
+    is_valid, error_msg = validate_input(user_input)
+    if not is_valid:
+        yield error_msg
+        return
+    
+    try:
+        logger.info(f"Processing query for thread {thread_id}: {user_input[:100]}...")
         
-        # Stream LLM tokens
-        if kind == "on_chat_model_stream":
-            content = event["data"]["chunk"].content
-            if content:
-                yield content
+        async for event in graph.astream_events(
+            {
+                "messages": [
+                    ("system", SYSTEM_PROMPT),
+                    ("user", user_input)
+                ]
+            },
+            config={"configurable": {"thread_id": thread_id}},
+            version="v2"
+        ):
+            kind = event["event"]
+            
+            # Stream LLM tokens
+            if kind == "on_chat_model_stream":
+                content = event["data"]["chunk"].content
+                if content:
+                    yield content
+            
+            # Optional: Log tool usage for debugging
+            elif kind == "on_tool_start":
+                tool_name = event["name"]
+                logger.info(f"Tool started: {tool_name}")
+            
+            elif kind == "on_tool_end":
+                tool_name = event["name"]
+                logger.info(f"Tool completed: {tool_name}")
+    
+    except Exception as e:
+        error_message = f"\n\n❌ An error occurred: {str(e)}"
+        logger.error(f"Error in run_agent: {str(e)}", exc_info=True)
+        yield error_message
+
+# ═══════════════════════════════════════════════════════════════════════════
+# UTILITY FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════
+
+def get_knowledge_base_stats() -> dict:
+    """Get statistics about the knowledge base."""
+    try:
+        collection = geology_facts._collection
+        count = collection.count()
+        
+        return {
+            "total_facts": count,
+            "persist_directory": "./geology_facts",
+            "status": "healthy"
+        }
+    except Exception as e:
+        logger.error(f"Error getting knowledge base stats: {str(e)}")
+        return {
+            "total_facts": 0,
+            "persist_directory": "./geology_facts",
+            "status": "error",
+            "error": str(e)
+        }
+
+def clear_knowledge_base():
+    """Clear all data from the knowledge base. Use with caution!"""
+    try:
+        geology_facts.delete_collection()
+        logger.warning("Knowledge base cleared!")
+        return True
+    except Exception as e:
+        logger.error(f"Error clearing knowledge base: {str(e)}")
+        return False
