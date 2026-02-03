@@ -213,6 +213,14 @@ def create_geological_images(prompt:str):
     Returns: 
         an explicative image or ilustration about geological concepts.
     """
+    
+    # Rewrite the prompt so DALL-E works better 
+    enhanced_prompt = (
+        f"A realistic, scientifically accurate geological illustration of: {prompt}. "
+        f"No text, no labels, no arrows, no diagrams. "
+        f"Photorealistic or painterly scientific illustration style. "
+        f"Focus on visual detail and natural textures."
+    )
 
     client = OpenAI()
     response = client.images.generate(
@@ -343,7 +351,14 @@ async def run_agent(user_input: str, thread_id: str):
             elif kind == "on_tool_end":
                 if event["name"] == "create_geological_images":
                     image_url = event["data"]["output"]
-                    yield f"Image created: {image_url}"
+
+                    # If it's still a ToolMessage object, extract content
+                    if hasattr(image_url, "content"):
+                        image_url = image_url.content
+                    
+                    # Clean any extra whitespaces
+                    image_url = str(image_url).strip()
+                    yield f"Image created:\n\n {image_url}"
 
     except Exception as e:
         error_message = f"\n\n❌ An error occurred: {str(e)}"
