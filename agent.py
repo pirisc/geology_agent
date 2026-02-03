@@ -1,4 +1,4 @@
-from typing import TypedDict, Annotated
+from typing import Annotated, TypedDict
 from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -6,21 +6,14 @@ from langgraph.checkpoint.memory import MemorySaver
 from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain.tools import tool
-from langchain_community.vectorstores import Chroma
-from langchain_openai import OpenAIEmbeddings
 from bs4 import BeautifulSoup 
 import requests
-from datetime import datetime
-import logging
-import os
+from openai import OpenAI
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SETUP & CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # API KEYS
 from dotenv import load_dotenv, find_dotenv
@@ -30,7 +23,6 @@ load_dotenv(find_dotenv(), override=True)
 MAX_INPUT_LENGTH = 10000  # Maximum characters for user input
 WEB_SCRAPER_CHAR_LIMIT = 5000  # Increased from 2000
 WEB_SCRAPER_TIMEOUT = 15  # Increased timeout
-KNOWLEDGE_BASE_SEARCH_RESULTS = 5
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM PROMPT
@@ -49,56 +41,6 @@ whether explaining plate tectonics to a curious student or discussing stable
 isotope geochemistry with a researcher.
 
 ═════════════════════════════════════════════════════════════════════════
-MEMORY & PERSONALIZATION SYSTEM - CRITICAL INSTRUCTIONS
-═══════════════════════════════════════════════════════════════════════════
-
-You have ONE memory system that you MUST use actively:
-
-1. GEOLOGICAL KNOWLEDGE BASE (geology_kb):
-   - Contains facts about minerals, rocks, formations, processes
-   - Check FIRST before searching the web
-   - Save important geological information you learn
-
-──────────────────────────────────────────────────────────────────────
-MANDATORY WORKFLOW FOR EVERY QUERY:
-─────────────────────────────────────────────────────────────────────────
-
-STEP 1: CHECK KNOWLEDGE BASE
-   → Call search_geology_knowledge(query) for the topic
-   → If found, use that information
-   → If not found, proceed to Step 2
-
-STEP 2: SEARCH WEB (if needed)
-   → Only if knowledge base didn't have the answer
-   → Call tavily_search or web_scraper_tool
-
-STEP 3: SAVE WHAT YOU LEARNED (OPTIONAL)
-   → Call save_geology_fact() for important geological information
-   → This is optional - use your judgment
-
-STEP 4: RESPOND TO THE USER (MANDATORY!)
-   → After using tools, you MUST provide a natural language answer
-   → Never end without responding to the user's question
-   → Synthesize information from tools into a clear response
-
-──────────────────────────────────────────────────────────────────────
-WHAT TO SAVE TO KNOWLEDGE BASE:
-─────────────────────────────────────────────────────────────────────────
-
-Save geological facts that are:
-✓ Mineral properties (formula, hardness, crystal system, color)
-✓ Rock characteristics and formation processes
-✓ Geological formations and their significance
-✓ Important geological processes or concepts
-✓ Location-specific geology
-
-Examples:
-- save_geology_fact("Quartz: SiO2, Mohs hardness 7, hexagonal crystal system", "mineral")
-- save_geology_fact("Granite: coarse-grained igneous rock with quartz, feldspar, mica", "rock")
-- save_geology_fact("Subduction zones form where oceanic plate descends beneath another plate", "process")
-
-═════════════════════════════════════════════════════════════════════════
-
 --------------------
 FORMATTING GUIDELINES
 --------------------
@@ -121,6 +63,7 @@ SCIENTIFIC APPROACH
   "seismic data indicates...", "field observations suggest...").
 - If information is uncertain or outside your knowledge, say so explicitly.
 - For ambiguous questions, state your assumptions or ask for clarification.
+- If 'tavily_search' is used, ALWAYS provide the source of the information find
 
 -------------------------------
 PROACTIVE ENGAGEMENT & QUESTIONS
@@ -140,6 +83,11 @@ Examples of good follow-up questions:
 - "Is this for a specific region or project you're working on?"
 - "Have you encountered [related concept] before? It's closely connected to this."
 - "What sparked your interest in this particular aspect of geology?"
+
+Also add a "Study Mode". If the user wants to be tested on something they learned, generate 
+2 question based on the topic and wait for their answer. After the user anwsers the questions,
+provide feedback and continue with this loop of questions and answers.
+
 
 Keep follow-ups natural and conversational—limit to 1-2 questions per response 
 to avoid overwhelming the user. Prioritize questions that enhance their understanding 
@@ -187,41 +135,18 @@ Your primary goal is to help users understand Earth science deeply, accurately,
 and safely—while fostering curiosity through thoughtful questions.
 """
 
-# ═══════════════════════════════════════════════════════════════════════════
-# MEMORY INITIALIZATION
-# ═══════════════════════════════════════════════════════════════════════════
-
-def initialize_knowledge_base():
-    """Initialize the Chroma vector store for geological knowledge."""
-    try:
-        embeddings = OpenAIEmbeddings()
-        
-        # Ensure directory exists
-        persist_dir = "./geology_facts"
-        os.makedirs(persist_dir, exist_ok=True)
-        
-        geology_facts = Chroma(
-            collection_name="geological_facts",
-            embedding_function=embeddings,
-            persist_directory=persist_dir
-        )
-        
-        logger.info("Geological knowledge base initialized successfully")
-        return geology_facts
-    
-    except Exception as e:
-        logger.error(f"Error initializing knowledge base: {str(e)}")
-        raise
-
-# Initialize the knowledge base
-geology_facts = initialize_knowledge_base()
 
 # ═══════════════════════════════════════════════════════════════════════════
 # TOOLS
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Tool 1: Web Search with Tavily
-tavily_search = TavilySearchResults(max_results=5)
+tavily_search = TavilySearchResults(
+    max_results=5, 
+    search_depth = "advanced",
+    include_images = True,
+    include_favicon = True
+)
 
 # Tool 2: Enhanced Web Scraper
 @tool
@@ -275,109 +200,44 @@ def web_scraper_tool(url: str) -> str:
         return f"Error: Request timed out after {WEB_SCRAPER_TIMEOUT} seconds for {url}"
     except requests.RequestException as e:
         return f"Error fetching {url}: {str(e)}"
-    except Exception as e:
-        logger.error(f"Unexpected error scraping {url}: {str(e)}")
-        return f"Unexpected error scraping {url}: {str(e)}"
-
-# Tool 3: Search Geology Knowledge
+ 
+# Tool 3: Create geological images
 @tool
-def search_geology_knowledge(query: str) -> str:
-    """
-    Search the geology knowledge base for information about minerals, rocks, 
-    geological processes, or concepts that have been saved before.
-    
-    Use this BEFORE searching the web to see if information is already known.
-    
-    Args:
-        query: Search query for geological information
-    
-    Returns:
-        Formatted results from knowledge base or message if nothing found
-    """
-    try:
-        if not query or not query.strip():
-            return "Error: Empty search query provided"
-        
-        results = geology_facts.similarity_search(
-            query, 
-            k=KNOWLEDGE_BASE_SEARCH_RESULTS
-        )
-        
-        if not results:
-            return "No relevant geological information found in knowledge base. Consider searching the web."
-        
-        formatted_results = []
-        for i, doc in enumerate(results, 1):
-            category = doc.metadata.get("category", "general")
-            saved_at = doc.metadata.get("saved_at", "unknown date")
-            formatted_results.append(
-                f"{i}. [{category.upper()}] {doc.page_content}\n   (Saved: {saved_at})"
-            )
-        
-        return "Found in knowledge base:\n\n" + "\n\n".join(formatted_results)
-    
-    except Exception as e:
-        logger.error(f"Error searching knowledge base: {str(e)}")
-        return f"Error searching knowledge base: {str(e)}"
+def create_geological_images(prompt:str):
+    """ Generate a geological ilustration or diagam based on the users prompt.
+    Useful for understanding geological concepts and visualizing structures.
 
-# Tool 4: Save Geology Facts
+    Args:
+        prompt: users prompt about what they want to be create
+    
+    Returns: 
+        an explicative image or ilustration about geological concepts.
+    """
+
+    client = OpenAI()
+    response = client.images.generate(
+        prompt = prompt,
+        model = "dall-e-3", # best for science
+        n = 1, # number of images
+        size= "1024x1024",
+        response_format= "url")
+
+    return response.data[0].url
+
+# Tool 4: Geneate quiz questions
 @tool
-def save_geology_fact(fact: str, category: str = "general") -> str:
+def generate_quiz_questions(topic:str, difficulty: str = "intermediate") -> str:
+    """ Generates a pair of 2 questions to help the user understand and learn a specific geological
+    topic. 
     """
-    Save important geological information to the knowledge base for future reference.
-
-    Use this when:
-        - Learning new geological facts worth remembering
-        - User shares information about rocks, minerals, or locations
-        - Discovering interesting geological processes or concepts
+    return f"Generate 2 {difficulty} questions about {topic}"
     
-    Args:
-        fact: The geological fact to save
-        category: Category of the fact (mineral, rock, formation, process, 
-                  location, concept, general)
-    
-    Returns:
-        Success or error message
-    
-    IMPORTANT: After saving, continue to answer the user's question!
-    """
-    valid_categories = ["mineral", "rock", "formation", "process", 
-                       "location", "concept", "general"]
-    
-    try:
-        if not fact or not fact.strip():
-            return "Error: Cannot save empty fact"
-        
-        # Validate category
-        if category not in valid_categories:
-            category = "general"
-            logger.warning(f"Invalid category provided, using 'general'")
-        
-        # Add to knowledge base
-        geology_facts.add_texts(
-            texts=[fact],
-            metadatas=[{
-                "category": category,
-                "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }]
-        )
-        
-        # Persist to disk
-        geology_facts.persist()
-        
-        logger.info(f"Saved geological fact to category '{category}'")
-        return f"✓ Successfully saved to knowledge base under '{category}'"
-    
-    except Exception as e:
-        logger.error(f"Error saving to knowledge base: {str(e)}")
-        return f"Error saving to knowledge base: {str(e)}"
-
 # Tool list
 tools = [
     tavily_search, 
-    web_scraper_tool, 
-    search_geology_knowledge, 
-    save_geology_fact
+    web_scraper_tool,
+    create_geological_images,
+    generate_quiz_questions
 ]
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -402,8 +262,8 @@ def chatbot(state: State):
     try:
         return {"messages": [llm.invoke(state["messages"])]}
     except Exception as e:
-        logger.error(f"Error in chatbot node: {str(e)}")
-        raise
+        raise f"Error in chatbot node: {str(e)}"
+        
 
 # Add nodes
 graph_builder.add_node("chatbot", chatbot)
@@ -456,9 +316,7 @@ async def run_agent(user_input: str, thread_id: str):
         yield error_msg
         return
     
-    try:
-        logger.info(f"Processing query for thread {thread_id}: {user_input[:100]}...")
-        
+    try:     
         async for event in graph.astream_events(
             {
                 "messages": [
@@ -477,50 +335,14 @@ async def run_agent(user_input: str, thread_id: str):
                 if content:
                     yield content
             
-            # Optional: Log tool usage for debugging
-            elif kind == "on_tool_start":
-                tool_name = event["name"]
-                logger.info(f"Tool started: {tool_name}")
-            
+            # Capture tool outputs (like images url)
             elif kind == "on_tool_end":
-                tool_name = event["name"]
-                logger.info(f"Tool completed: {tool_name}")
+                if event["name"] == "create_geological_images":
+                    image_url = event["data"]["output"]
+                    yield f"Image created: {image_url}"
+
     
     except Exception as e:
         error_message = f"\n\n❌ An error occurred: {str(e)}"
-        logger.error(f"Error in run_agent: {str(e)}", exc_info=True)
         yield error_message
 
-# ═══════════════════════════════════════════════════════════════════════════
-# UTILITY FUNCTIONS
-# ═══════════════════════════════════════════════════════════════════════════
-
-def get_knowledge_base_stats() -> dict:
-    """Get statistics about the knowledge base."""
-    try:
-        collection = geology_facts._collection
-        count = collection.count()
-        
-        return {
-            "total_facts": count,
-            "persist_directory": "./geology_facts",
-            "status": "healthy"
-        }
-    except Exception as e:
-        logger.error(f"Error getting knowledge base stats: {str(e)}")
-        return {
-            "total_facts": 0,
-            "persist_directory": "./geology_facts",
-            "status": "error",
-            "error": str(e)
-        }
-
-def clear_knowledge_base():
-    """Clear all data from the knowledge base. Use with caution!"""
-    try:
-        geology_facts.delete_collection()
-        logger.warning("Knowledge base cleared!")
-        return True
-    except Exception as e:
-        logger.error(f"Error clearing knowledge base: {str(e)}")
-        return False
