@@ -317,15 +317,22 @@ async def run_agent(user_input: str, thread_id: str):
         return
     
     try:     
+        config={"configurable": {"thread_id": thread_id}}
+        
+        state = graph.get_state(config)
+
+        if not state.values.get("messages"):
+            messages = [
+                ("system", SYSTEM_PROMPT),
+                ("user", user_input)
+            ]
+        else: 
+            messages = [("user", user_input)]
+
         async for event in graph.astream_events(
-            {
-                "messages": [
-                    ("system", SYSTEM_PROMPT),
-                    ("user", user_input)
-                ]
-            },
-            config={"configurable": {"thread_id": thread_id}},
-            version="v2"
+            {"messages": messages},
+            config= config,
+            version= "v2"
         ):
             kind = event["event"]
             
