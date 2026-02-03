@@ -262,7 +262,7 @@ def chatbot(state: State):
     try:
         return {"messages": [llm.invoke(state["messages"])]}
     except Exception as e:
-        raise f"Error in chatbot node: {str(e)}"
+        raise RuntimeError(f"Error in chatbot node: {str(e)}") from e
         
 
 # Add nodes
@@ -316,40 +316,35 @@ async def run_agent(user_input: str, thread_id: str):
         yield error_msg
         return
     
-    try:     
-        config={"configurable": {"thread_id": thread_id}}
-        
-        state = graph.get_state(config)
+    try:
+        config = {"configurable": {"thread_id": thread_id}}
 
-        if not state.values.get("messages"):
-            messages = [
-                ("system", SYSTEM_PROMPT),
-                ("user", user_input)
-            ]
-        else: 
-            messages = [("user", user_input)]
+        # Retrieve the full conversation history from the checkpointer
+        state = graph.get_state(config)
+        history = state.values.get("messages", [])
+
+        # Always build the full message list:
+        messages = [("system", SYSTEM_PROMPT)] + history + [("user", user_input)]
 
         async for event in graph.astream_events(
             {"messages": messages},
-            config= config,
-            version= "v2"
+            config=config,
+            version="v2"
         ):
             kind = event["event"]
-            
+
             # Stream LLM tokens
             if kind == "on_chat_model_stream":
                 content = event["data"]["chunk"].content
                 if content:
                     yield content
-            
-            # Capture tool outputs (like images url)
+
+            # Capture tool outputs (like image urls)
             elif kind == "on_tool_end":
                 if event["name"] == "create_geological_images":
                     image_url = event["data"]["output"]
                     yield f"Image created: {image_url}"
 
-    
     except Exception as e:
         error_message = f"\n\n❌ An error occurred: {str(e)}"
         yield error_message
-
