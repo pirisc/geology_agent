@@ -216,15 +216,17 @@ def create_geological_images(prompt:str):
     
     # Rewrite the prompt so DALL-E works better 
     enhanced_prompt = (
-        f"A realistic, scientifically accurate geological illustration of: {prompt}. "
-        f"No text, no labels, no arrows, no diagrams. "
-        f"Photorealistic or painterly scientific illustration style. "
-        f"Focus on visual detail and natural textures."
+        f"A scientifically accurate geological illustration of: {prompt}. "
+        f"IMPORTANT: This image must contain absolutely NO text of any kind. "
+        f"No labels, no words, no letters, no numbers, no annotations, no legends. "
+        f"Pure visual illustration only. "
+        f"Painterly scientific illustration style, like something from a nature documentary. "
+        f"Focus on realistic textures, colors, and geological detail."
     )
 
     client = OpenAI()
     response = client.images.generate(
-        prompt = prompt,
+        prompt = enhanced_prompt,
         model = "dall-e-3", # best for science
         n = 1, # number of images
         size= "1024x1024",
