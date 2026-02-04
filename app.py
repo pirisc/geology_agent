@@ -30,8 +30,8 @@ async def chat(req: ChatRequest):
     
     try:
         async def generate():
-            # Send thread_id first
-            yield f"data: {{'thread_id': '{thread_id}'}}\n\n"
+            # Send thread_id first - properly formatted JSON
+            yield f"data: {json.dumps({'thread_id': thread_id})}\n\n"
             
             # Stream tokens
             async for chunk in run_agent(req.message, thread_id):
