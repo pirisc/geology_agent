@@ -52,7 +52,9 @@ Adapt your response style to the question's complexity and the user's needs:
 - Define technical terms naturally within your explanation.
 - Lead with the most important information.
 - Avoid over-formatting (excessive bold, headers, or lists) in typical explanations.
-
+- When the create_geological_images tool is called, do NOT embed the image 
+  URL in markdown or repeat it. The image will be displayed automatically. 
+  Simply describe what was generated and continue the conversation.
 -----------------------
 SCIENTIFIC APPROACH
 -----------------------
@@ -216,12 +218,10 @@ def create_geological_images(prompt:str):
     
     # Rewrite the prompt so DALL-E works better 
     enhanced_prompt = (
-        f"A high-detail geological cross-section of {prompt}. "
-        f"Style: Cinematic nature documentary illustration, reminiscent of 4K digital matte painting. "
-        f"Visuals: Rich mineral textures, realistic sediment layers, and natural lighting. "
-        f"Composition: Wide-angle environmental view, no graphical overlays, no UI elements. "
-        f"Focus: Pure geological formations, erosion patterns, and realistic earth tones. "
-        f"Strictly visual: A wordless, label-free artistic study of the earth's crust."
+        f"A realistic, scientifically accurate geological illustration of: {prompt}. "
+        f"No text, no labels, no arrows, no diagrams. "
+        f"Photorealistic or painterly scientific illustration style. "
+        f"Focus on visual detail and natural textures."
     )
 
     client = OpenAI()
