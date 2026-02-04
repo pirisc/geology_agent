@@ -216,12 +216,12 @@ def create_geological_images(prompt:str):
     
     # Rewrite the prompt so DALL-E works better 
     enhanced_prompt = (
-        f"A scientifically accurate geological illustration of: {prompt}. "
-        f"IMPORTANT: This image must contain absolutely NO text of any kind. "
-        f"No labels, no words, no letters, no numbers, no annotations, no legends. "
-        f"Pure visual illustration only. "
-        f"Painterly scientific illustration style, like something from a nature documentary. "
-        f"Focus on realistic textures, colors, and geological detail."
+        f"A high-detail geological cross-section of {prompt}. "
+        f"Style: Cinematic nature documentary illustration, reminiscent of 4K digital matte painting. "
+        f"Visuals: Rich mineral textures, realistic sediment layers, and natural lighting. "
+        f"Composition: Wide-angle environmental view, no graphical overlays, no UI elements. "
+        f"Focus: Pure geological formations, erosion patterns, and realistic earth tones. "
+        f"Strictly visual: A wordless, label-free artistic study of the earth's crust."
     )
 
     client = OpenAI()
@@ -329,12 +329,15 @@ async def run_agent(user_input: str, thread_id: str):
     try:
         config = {"configurable": {"thread_id": thread_id}}
 
-        # Retrieve the full conversation history from the checkpointer
+        # Check if this is a new conversation
         state = graph.get_state(config)
-        history = state.values.get("messages", [])
+        is_new_conversation = not state.values.get("messages")
 
-        # Always build the full message list:
-        messages = [("system", SYSTEM_PROMPT)] + history + [("user", user_input)]
+        # Only include system prompt on first message
+        if is_new_conversation:
+            messages = [("system", SYSTEM_PROMPT), ("user", user_input)]
+        else:
+            messages = [("user", user_input)]
 
         async for event in graph.astream_events(
             {"messages": messages},
@@ -353,14 +356,10 @@ async def run_agent(user_input: str, thread_id: str):
             elif kind == "on_tool_end":
                 if event["name"] == "create_geological_images":
                     image_url = event["data"]["output"]
-
-                    # If it's still a ToolMessage object, extract content
                     if hasattr(image_url, "content"):
                         image_url = image_url.content
-                    
-                    # Clean any extra whitespaces
                     image_url = str(image_url).strip()
-                    yield f"Image created:\n\n {image_url}"
+                    yield f"\n\n![Generated Geological Image]({image_url})\n\n"
 
     except Exception as e:
         error_message = f"\n\n❌ An error occurred: {str(e)}"
