@@ -5,28 +5,42 @@ pydantic==2.5.3
 pydantic-settings==2.1.0
 
 # LangChain & LangGraph
-langchain==0.1.20
-langchain-openai==0.0.8
-langchain-community==0.0.38
-langgraph==0.0.55
-langsmith==0.1.17
+langchain==0.1.4
+langchain-openai==0.0.5
+langchain-community==0.0.16
+langgraph==0.0.20
+langsmith==0.0.80
 
 # Web Scraping & Search
 beautifulsoup4==4.12.3
 requests==2.31.0
-tavily-python==0.3.3
+tavily-python==0.3.0
 
-# Environment & Configuration
-python-dotenv==1.0.1
+# Environment
+python-dotenv==1.0.0
 
-# HTTP Client
+# Testing
+pytest==7.4.4
+pytest-asyncio==0.23.3
 httpx==0.26.0
 
-# Security
-python-multipart==0.0.9
+# Logging
+structlog==24.1.0
+python-json-logger==2.0.7
 
-# Production Server
+# Rate Limiting
+redis==5.0.1
+slowapi==0.1.9
+
+# Database
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.25
+
+# Security
+python-multipart==0.0.6
+
+# Production
 gunicorn==21.2.0
 
-# Additional Utilities
+# Utilities
 tenacity==8.2.3
