@@ -14,7 +14,7 @@ langsmith>=0.0.83,<0.1
 # Web Scraping & Search
 beautifulsoup4==4.12.3
 requests==2.31.0
-tavily-python==0.3.0
+tavily-python>=0.3.5
 
 # Environment
 python-dotenv==1.0.0
