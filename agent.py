@@ -8,7 +8,6 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain.tools import tool
 from bs4 import BeautifulSoup 
 import requests
-from openai import OpenAI
 import logging
 from datetime import datetime
 
@@ -67,19 +66,21 @@ Adapt your response style to the question's complexity and the user's needs:
 - When the create_geological_images tool is called, DO NOT embed the image 
   URL in markdown or repeat it. The image will be displayed automatically by the frontend.
   Simply continue the conversation naturally.
-- Use the image generation tool thoughtfully:
-  * GOOD: "Let me show you what granite looks like" → generate photo of granite sample
-  * GOOD: "Here's what a stratovolcano looks like" → generate realistic volcano photo
-  * BAD: Don't generate images for simple concepts that are better explained with words
-  * BAD: Don't generate images when the user just wants text information
-- When generating images, be VERY specific in your description to the tool:
-  * Instead of: "a volcano"
-  * Use: "professional photograph of a stratovolcano with steep sides, visible crater at summit, snow-covered peak, showing typical conical shape"
-  * Instead of: "granite rock"
-  * Use: "close-up photograph of granite rock sample showing pink feldspar crystals, gray quartz, and black biotite mica, museum specimen quality with clear crystal boundaries"
-  * IMPORTANT: Never request "with labels" or "labeled diagram" - AI-generated text is illegible
-  * Focus on photographic quality and visual details that show the geology clearly
-- After generating an image, explain what the user is seeing in the text response
+- When the get_geological_image tool is called, it fetches REAL geological photographs
+  from professional databases (not AI-generated). The image will be displayed automatically.
+  Simply continue the conversation naturally.
+- Use the image tool when it adds educational value:
+  * GOOD: "Let me show you what granite actually looks like" → fetches real granite photo
+  * GOOD: "Here's a real example of columnar basalt from Iceland" → shows actual formation
+  * BAD: Don't show images for abstract concepts better explained with words
+  * BAD: Don't show images when the user just wants text information
+- When requesting images, be SPECIFIC to get the best photographic results:
+  * Good: "pink granite with feldspar crystals"
+  * Good: "basalt columnar joints Iceland"
+  * Good: "sedimentary rock layers cliff face"
+  * Bad: Generic like "rocks" or "minerals" - be specific about what to show!
+- These are REAL photographs, so you can confidently say "Here's what X actually looks like"
+  instead of "Here's an illustration of X"
 -----------------------
 SCIENTIFIC APPROACH
 -----------------------
@@ -246,85 +247,105 @@ def web_scraper_tool(url: str) -> str:
         logger.error(f"Unexpected error scraping {url}: {str(e)}")
         return f"Unexpected error processing {url}: {str(e)}"
  
-# Tool 3: Enhanced Geological Image Generation
+# Tool 3: Real Geological Image Search using Unsplash
 @tool
-def create_geological_images(description: str) -> str:
+def get_geological_image(description: str) -> str:
     """
-    Generate educational geological illustrations, diagrams, or visualizations using DALL-E 3.
-    Use this to help users visualize geological concepts, structures, or processes.
+    Fetch real, scientifically accurate geological photographs from Unsplash.
+    Provides high-quality images of actual rocks, minerals, and geological formations.
+    
+    Use this when users want to see what geological features actually look like.
+    Much better than AI-generated images for educational purposes.
     
     Best for:
-    - Rock types and mineral samples
-    - Geological structures (folds, faults, unconformities)
-    - Plate tectonic processes
-    - Sedimentary environments
-    - Cross-sections and stratigraphic columns
-    - Geological time periods and paleoenvironments
+    - Rock types and mineral samples (granite, basalt, quartz, etc.)
+    - Geological structures (canyons, cliffs, mountains)
+    - Natural formations (columnar basalt, sedimentary layers)
+    - Landscapes showing geological features
+    - Fossils and paleontological specimens
     
     Args:
-        description: What geological concept to visualize (be specific and detailed)
+        description: What geological feature to show (be specific: "pink granite with feldspar crystals")
     
     Returns: 
-        URL of the generated educational image
+        URL of real geological photograph from Unsplash
     """
     try:
-        logger.info(f"Generating geological image: {description[:100]}")
+        logger.info(f"Searching for geological image: {description}")
         
-        # Significantly enhanced prompt engineering for better geological accuracy
-        # IMPORTANT: Avoid text labels as they're often illegible in AI-generated images
-        enhanced_prompt = f"""Create a highly detailed, scientifically accurate geological photograph or illustration:
-
-SUBJECT: {description}
-
-VISUAL STYLE:
-- Professional nature/geological photography style or high-quality scientific illustration
-- Crystal clear details and sharp focus
-- Photorealistic textures showing actual rock, mineral, or geological features
-- Natural, well-lit composition that highlights geological characteristics
-- Museum specimen quality or field photograph aesthetic
-
-COLOR & TEXTURE REQUIREMENTS:
-- Authentic geological colors (browns, grays, reds, yellows, blacks for rocks)
-- Realistic mineral luster and crystal structures where applicable
-- Accurate weathering patterns and surface textures
-- Natural color gradients in sedimentary layers
-- True-to-life mineral formations and rock textures
-
-COMPOSITION:
-- Clear, unobstructed view of the main geological feature
-- Appropriate scale reference if needed (hand, rock hammer, coin)
-- Natural geological context (in situ when relevant)
-- Professional framing similar to scientific publications
-- Clean background that doesn't distract from the subject
-
-AVOID COMPLETELY:
-- Any text, labels, or written annotations (these are illegible in AI images)
-- Diagrams with arrows or text overlays
-- Cartoon or abstract artistic styles
-- Unrealistic fantasy colors
-- Overly simplified or stylized graphics
-- Any words, numbers, or text elements
-
-IMPORTANT: Create a pure visual representation without any text. The image should be self-explanatory through its realistic depiction of geological features. Focus entirely on photographic quality and geological accuracy."""
+        # Get Unsplash API key from environment
+        import os
+        unsplash_key = os.getenv("UNSPLASH_ACCESS_KEY")
         
-        client = OpenAI()
-        response = client.images.generate(
-            prompt=enhanced_prompt,
-            model="dall-e-3",
-            n=1,
-            size="1024x1024",
-            quality="hd",  # HD quality for better clarity
-            response_format="url",
-            style="natural"  # Natural style for realistic geological images
-        )
+        if not unsplash_key:
+            logger.warning("UNSPLASH_ACCESS_KEY not found in environment variables")
+            # Fallback to web search
+            return search_geological_image_fallback(description)
+        
+        # Search Unsplash for geological images
+        url = "https://api.unsplash.com/search/photos"
+        params = {
+            "query": f"{description} geology rock mineral formation",
+            "client_id": unsplash_key,
+            "per_page": 3,  # Get top 3 to choose best
+            "orientation": "landscape",
+            "content_filter": "high"  # High quality only
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        
+        if data.get('results') and len(data['results']) > 0:
+            # Get the best matching image
+            best_image = data['results'][0]
+            image_url = best_image['urls']['regular']
+            photographer = best_image['user']['name']
+            photo_link = best_image['links']['html']
+            
+            logger.info(f"Found Unsplash image by {photographer}: {image_url[:50]}...")
+            
+            # Return just the URL - the frontend will display it
+            return image_url
+        else:
+            logger.warning(f"No Unsplash results for: {description}")
+            return search_geological_image_fallback(description)
+            
+    except requests.RequestException as e:
+        logger.error(f"Unsplash API error: {e}")
+        return search_geological_image_fallback(description)
+    except Exception as e:
+        logger.error(f"Error fetching geological image: {e}")
+        return f"Unable to fetch image: {str(e)}"
 
-        image_url = response.data[0].url
-        logger.info(f"Successfully generated image: {image_url[:50]}...")
-        return image_url
+def search_geological_image_fallback(description: str) -> str:
+    """
+    Fallback method using web search when Unsplash is unavailable.
+    Searches for geological images on the web.
+    """
+    try:
+        logger.info(f"Using fallback web search for: {description}")
+        
+        # Use the existing tavily search
+        search_query = f"{description} geology high resolution photo"
+        results = tavily_search.invoke(search_query)
+        
+        # Try to extract image URLs from results
+        if isinstance(results, list):
+            for result in results:
+                if isinstance(result, dict):
+                    # Check if result has images
+                    if 'images' in result and result['images']:
+                        logger.info(f"Found image via web search: {result['images'][0][:50]}...")
+                        return result['images'][0]
+        
+        # If no images found, return a helpful message
+        logger.warning(f"No images found via fallback for: {description}")
+        return f"Image search unavailable. Please search manually: https://unsplash.com/s/photos/{description.replace(' ', '-')}-geology"
         
     except Exception as e:
-        logger.error(f"Error generating image: {str(e)}")
-        return f"Error generating image: {str(e)}"
+        logger.error(f"Fallback search error: {e}")
+        return "Image search temporarily unavailable."
 
 # Tool 4: Enhanced Quiz Generation
 @tool
@@ -348,7 +369,7 @@ def generate_quiz_questions(topic: str, difficulty: str = "intermediate", num_qu
 tools = [
     tavily_search, 
     web_scraper_tool,
-    create_geological_images,
+    get_geological_image,  # Now using real photos instead of DALL-E
     generate_quiz_questions
 ]
 
