@@ -1,11 +1,51 @@
-fastapi
-uvicorn
-langgraph
-langchain
-langchain-openai
-langchain-community
-tavily-python
-beautifulsoup4
-requests
-python-dotenv
-chromadb
+# Core Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# LangChain & LangGraph
+langchain==0.1.4
+langchain-openai==0.0.5
+langchain-community==0.0.16
+langgraph==0.0.20
+langsmith==0.0.80
+
+# Web Scraping & Search
+beautifulsoup4==4.12.3
+requests==2.31.0
+tavily-python==0.3.0
+
+# Environment & Configuration
+python-dotenv==1.0.0
+
+# Async & Concurrency
+asyncio==3.4.3
+
+# Testing (Optional but recommended)
+pytest==7.4.4
+pytest-asyncio==0.23.3
+httpx==0.26.0
+
+# Monitoring & Logging (Recommended)
+structlog==24.1.0
+python-json-logger==2.0.7
+
+# Rate Limiting (If using Redis)
+redis==5.0.1
+slowapi==0.1.9
+
+# Database (If implementing PostgreSQL)
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.25
+
+# Security
+python-multipart==0.0.6
+
+# Production Server
+gunicorn==21.2.0
+
+# Additional Utilities
+tenacity==8.2.3  
+httpx==0.26.0    
+
