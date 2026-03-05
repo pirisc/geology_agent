@@ -68,15 +68,18 @@ Adapt your response style to the question's complexity and the user's needs:
   URL in markdown or repeat it. The image will be displayed automatically by the frontend.
   Simply continue the conversation naturally.
 - Use the image generation tool thoughtfully:
-  * GOOD: "Let me show you what granite looks like" → generate image of granite sample
-  * GOOD: "Here's a diagram of plate boundaries" → generate cross-section diagram
+  * GOOD: "Let me show you what granite looks like" → generate photo of granite sample
+  * GOOD: "Here's what a stratovolcano looks like" → generate realistic volcano photo
   * BAD: Don't generate images for simple concepts that are better explained with words
   * BAD: Don't generate images when the user just wants text information
 - When generating images, be VERY specific in your description to the tool:
   * Instead of: "a volcano"
-  * Use: "cross-section diagram of a stratovolcano showing magma chamber, conduit, layers of ash and lava, with labels"
+  * Use: "professional photograph of a stratovolcano with steep sides, visible crater at summit, snow-covered peak, showing typical conical shape"
   * Instead of: "granite rock"
-  * Use: "close-up photograph of granite rock sample showing pink feldspar crystals, gray quartz, and black biotite mica, museum specimen quality"
+  * Use: "close-up photograph of granite rock sample showing pink feldspar crystals, gray quartz, and black biotite mica, museum specimen quality with clear crystal boundaries"
+  * IMPORTANT: Never request "with labels" or "labeled diagram" - AI-generated text is illegible
+  * Focus on photographic quality and visual details that show the geology clearly
+- After generating an image, explain what the user is seeing in the text response
 -----------------------
 SCIENTIFIC APPROACH
 -----------------------
@@ -268,32 +271,41 @@ def create_geological_images(description: str) -> str:
         logger.info(f"Generating geological image: {description[:100]}")
         
         # Significantly enhanced prompt engineering for better geological accuracy
-        enhanced_prompt = f"""Create a highly detailed, scientifically accurate geological illustration:
+        # IMPORTANT: Avoid text labels as they're often illegible in AI-generated images
+        enhanced_prompt = f"""Create a highly detailed, scientifically accurate geological photograph or illustration:
 
 SUBJECT: {description}
 
-STYLE REQUIREMENTS:
-- Photorealistic scientific visualization style
-- Clear educational diagram with professional quality
-- Accurate geological colors and textures (realistic rock colors, mineral patterns, sediment layers)
-- Clean, well-organized composition suitable for textbooks
-- Natural lighting that shows geological features clearly
+VISUAL STYLE:
+- Professional nature/geological photography style or high-quality scientific illustration
+- Crystal clear details and sharp focus
+- Photorealistic textures showing actual rock, mineral, or geological features
+- Natural, well-lit composition that highlights geological characteristics
+- Museum specimen quality or field photograph aesthetic
 
-TECHNICAL DETAILS:
-- Show realistic geological textures and structures
-- Include subtle weathering and natural surface details
-- Use authentic earth-tone color palettes (browns, grays, reds, yellows for rocks and minerals)
-- Demonstrate proper scale and proportions
-- Show clear geological features (layers, crystals, folds, faults as relevant)
+COLOR & TEXTURE REQUIREMENTS:
+- Authentic geological colors (browns, grays, reds, yellows, blacks for rocks)
+- Realistic mineral luster and crystal structures where applicable
+- Accurate weathering patterns and surface textures
+- Natural color gradients in sedimentary layers
+- True-to-life mineral formations and rock textures
 
-FORMAT:
-- Educational illustration style similar to National Geographic or scientific textbooks
-- Professional photography or detailed scientific drawing aesthetic
-- Clear focus on the geological subject
-- Natural background or geological context
-- High detail and clarity
+COMPOSITION:
+- Clear, unobstructed view of the main geological feature
+- Appropriate scale reference if needed (hand, rock hammer, coin)
+- Natural geological context (in situ when relevant)
+- Professional framing similar to scientific publications
+- Clean background that doesn't distract from the subject
 
-AVOID: cartoons, abstract art, unrealistic colors, fantasy elements, simplified graphics"""
+AVOID COMPLETELY:
+- Any text, labels, or written annotations (these are illegible in AI images)
+- Diagrams with arrows or text overlays
+- Cartoon or abstract artistic styles
+- Unrealistic fantasy colors
+- Overly simplified or stylized graphics
+- Any words, numbers, or text elements
+
+IMPORTANT: Create a pure visual representation without any text. The image should be self-explanatory through its realistic depiction of geological features. Focus entirely on photographic quality and geological accuracy."""
         
         client = OpenAI()
         response = client.images.generate(
@@ -301,9 +313,9 @@ AVOID: cartoons, abstract art, unrealistic colors, fantasy elements, simplified 
             model="dall-e-3",
             n=1,
             size="1024x1024",
-            quality="hd",  # Changed to HD quality for better results
+            quality="hd",  # HD quality for better clarity
             response_format="url",
-            style="natural"  # Natural style for more realistic geological images
+            style="natural"  # Natural style for realistic geological images
         )
 
         image_url = response.data[0].url
