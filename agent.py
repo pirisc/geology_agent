@@ -385,14 +385,11 @@ graph_builder = StateGraph(State)
 
 # Initialize LLM with improved settings
 llm = ChatOpenAI(
-    model="gpt-4o-mini",
-    temperature=0.7,  # Slightly higher for more engaging responses
-    streaming=True,
-    model_kwargs={
-        "top_p": 0.9,
-        "frequency_penalty": 0.3,  # Reduce repetition
-        "presence_penalty": 0.1
-    }
+    model="gpt-4",
+    temperature=0.7,
+    presence_penalty=0.6,
+    frequency_penalty=0.5,
+    top_p=0.9
 ).bind_tools(tools=tools)
 
 def chatbot(state: State):
