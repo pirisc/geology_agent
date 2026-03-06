@@ -347,6 +347,19 @@ def search_geological_image_fallback(description: str) -> str:
 # Tool 4: Enhanced Quiz Generation
 @tool
 def generate_quiz_questions(topic: str, difficulty: str = "intermediate", num_questions: int = 2) -> str:
+    """
+    Generate quiz questions to test the user's understanding of a geological topic.
+    
+    Use this when users want to test their knowledge or study a topic interactively.
+    
+    Args:
+        topic: The geological topic to generate questions about
+        difficulty: Difficulty level - "beginner", "intermediate", or "advanced"
+        num_questions: Number of questions to generate (default 2)
+    
+    Returns:
+        Instructions to generate quiz questions
+    """
     return f"Generate {num_questions} {difficulty}-level questions about {topic} to test the user's understanding."
     
 # Tool list
