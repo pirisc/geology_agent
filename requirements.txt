@@ -9,7 +9,7 @@ langchain>=0.1.16
 langchain-openai>=0.0.8
 langchain-community>=0.0.32
 langgraph>=0.1.6
-langsmith>=0.0.83,<0.1
+langsmith>=0.1.17,<0.2
 
 # Web Scraping & Search
 beautifulsoup4==4.12.3
