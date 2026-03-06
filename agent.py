@@ -63,12 +63,9 @@ Adapt your response style to the question's complexity and the user's needs:
 - Define technical terms naturally within your explanation.
 - Lead with the most important information.
 - Avoid over-formatting (excessive bold, headers, or lists) in typical explanations.
-- When the create_geological_images tool is called, DO NOT embed the image 
-  URL in markdown or repeat it. The image will be displayed automatically by the frontend.
-  Simply continue the conversation naturally.
-- When the get_geological_image tool is called, it fetches REAL geological photographs
-  from professional databases (not AI-generated). The image will be displayed automatically.
-  Simply continue the conversation naturally.
+- When you use the get_geological_image tool, the image will be displayed automatically 
+  by the system. Simply mention that you're showing the image in your response, like:
+  "Let me show you what granite looks like" or "Here's a real photograph of basalt columns"
 - Use the image tool when it adds educational value:
   * GOOD: "Let me show you what granite actually looks like" → fetches real granite photo
   * GOOD: "Here's a real example of columnar basalt from Iceland" → shows actual formation
@@ -79,7 +76,7 @@ Adapt your response style to the question's complexity and the user's needs:
   * Good: "basalt columnar joints Iceland"
   * Good: "sedimentary rock layers cliff face"
   * Bad: Generic like "rocks" or "minerals" - be specific about what to show!
-- These are REAL photographs, so you can confidently say "Here's what X actually looks like"
+- These are REAL photographs from Unsplash, so you can confidently say "Here's what X actually looks like"
   instead of "Here's an illustration of X"
 -----------------------
 SCIENTIFIC APPROACH
@@ -341,28 +338,15 @@ def search_geological_image_fallback(description: str) -> str:
         
         # If no images found, return a helpful message
         logger.warning(f"No images found via fallback for: {description}")
-        return f"Image search unavailable. Please search manually: https://unsplash.com/s/photos/{description.replace(' ', '-')}-geology"
+        return f"NO_IMAGE_FOUND: {description}"
         
     except Exception as e:
         logger.error(f"Fallback search error: {e}")
-        return "Image search temporarily unavailable."
+        return f"IMAGE_ERROR: {str(e)}"
 
 # Tool 4: Enhanced Quiz Generation
 @tool
 def generate_quiz_questions(topic: str, difficulty: str = "intermediate", num_questions: int = 2) -> str:
-    """
-    Generate quiz questions to test understanding of a geological topic.
-    Use this when users want to test their knowledge or enter study mode.
-    
-    Args:
-        topic: The geological topic to create questions about
-        difficulty: Question difficulty level (beginner/intermediate/advanced)
-        num_questions: Number of questions to generate (default 2, max 5)
-    
-    Returns:
-        Instruction to generate quiz questions
-    """
-    num_questions = min(max(num_questions, 1), 5)  # Clamp between 1-5
     return f"Generate {num_questions} {difficulty}-level questions about {topic} to test the user's understanding."
     
 # Tool list
@@ -502,7 +486,8 @@ async def run_agent(user_input: str, thread_id: str) -> AsyncGenerator[str, None
             elif kind == "on_tool_end":
                 tool_name = event.get("name", "")
                 
-                if tool_name == "create_geological_images":
+                # Handle the get_geological_image tool
+                if tool_name == "get_geological_image":
                     image_url = event["data"]["output"]
                     if hasattr(image_url, "content"):
                         image_url = image_url.content
@@ -510,8 +495,11 @@ async def run_agent(user_input: str, thread_id: str) -> AsyncGenerator[str, None
                     
                     # Only yield if it's a valid URL
                     if image_url.startswith("http"):
-                        yield f"\n\n![Generated Geological Image]({image_url})\n\n"
-                        logger.info(f"Generated image: {image_url[:50]}...")
+                        yield f"\n\n![Geological Image]({image_url})\n\n"
+                        logger.info(f"Displaying geological image: {image_url[:50]}...")
+                    elif "NO_IMAGE_FOUND" in image_url or "IMAGE_ERROR" in image_url:
+                        logger.warning(f"Image fetch failed: {image_url}")
+                        # Don't show error to user, let the LLM handle it
         
         logger.info(f"Completed agent run for thread {thread_id}, tokens: {token_count}")
 
