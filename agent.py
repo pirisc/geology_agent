@@ -1,8 +1,6 @@
-from typing import Annotated, TypedDict, AsyncGenerator, Any, Optional
+from typing import Annotated, TypedDict, AsyncGenerator
 import logging
-import re
 
-import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv, find_dotenv
 from langchain.tools import tool
@@ -12,20 +10,30 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
+import requests
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# ═══════════════════════════════════════════════════════════════════════════
+# LOGGING SETUP
+# ═══════════════════════════════════════════════════════════════════════════
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger(__name__)
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SETUP & CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════
 
 load_dotenv(find_dotenv(), override=True)
 
-MAX_INPUT_LENGTH = 10_000
-WEB_SCRAPER_CHAR_LIMIT = 8_000
+MAX_INPUT_LENGTH = 10000
+WEB_SCRAPER_CHAR_LIMIT = 8000
 WEB_SCRAPER_TIMEOUT = 20
-HTTP_TIMEOUT = 10
-IMAGE_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SYSTEM PROMPT - Updated comprehensive version
+# SYSTEM PROMPT
 # ═══════════════════════════════════════════════════════════════════════════
 
 SYSTEM_PROMPT = """
@@ -53,26 +61,23 @@ Adapt your response style to the question's complexity and the user's needs:
 - Avoid over-formatting (excessive bold, headers, or lists) in typical explanations.
 
 -----------------------
-USING IMAGES
+PROVIDING IMAGE RESOURCES
 -----------------------
-You have a tool called 'get_geological_image' that automatically fetches the right type of image:
+You have a tool called 'find_geological_images' that provides links to trusted geology image sources:
 
-**The tool is smart - just describe what you want:**
-- "tectonic plate boundaries diagram" → fetches diagram
-- "basalt rock sample" → fetches photo  
-- "rock cycle diagram" → fetches diagram
-- "granite outcrop" → fetches photo
+**How to use it:**
+- Use it when visual examples would help (rocks, minerals, diagrams, processes)
+- Be specific in your description: "basalt thin section" not just "rock"
+- The tool automatically picks the best resource (Mindat for minerals, USGS for diagrams, etc.)
 
-**Be specific in your descriptions:**
-- Good: "subduction zone cross-section diagram"
-- Good: "sedimentary rock layers in cliff"
-- Bad: Generic terms like "rocks" or "geology"
+**Example usage:**
+- User asks about granite → explain, then mention: "Let me point you to some images of granite"
+- User asks about plate boundaries → explain, then: "I can show you where to find diagrams of this"
 
-**How to use it naturally:**
-- Simply mention you're showing an image: "Let me show you a diagram of plate boundaries"
-- The image will display automatically - you don't need to describe it in detail
-- Use images to enhance understanding, especially for visual concepts
-- If an image can't be found, I'll let you know and continue with the explanation
+**What it provides:**
+- Direct links to professional geology databases
+- High-quality, scientifically accurate images
+- Resources maintained by geologists and institutions
 
 -----------------------
 SCIENTIFIC APPROACH
@@ -158,10 +163,14 @@ Your primary goal is to help users understand Earth science deeply, accurately,
 and safely—while fostering curiosity through thoughtful questions.
 """
 
+# ═══════════════════════════════════════════════════════════════════════════
+# TOOLS
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Tool 1: Web Search
 tavily_search = TavilySearchResults(
     max_results=5,
     search_depth="advanced",
-    include_images=True,
     include_answer=True,
     include_raw_content=False,
 )
@@ -170,7 +179,7 @@ tavily_search = TavilySearchResults(
 @tool
 def web_scraper_tool(url: str) -> str:
     """Scrape a webpage and return cleaned text content."""
-    if not isinstance(url, str) or not url.strip():
+    if not url or not isinstance(url, str):
         return "Error: Invalid URL provided"
 
     url = url.strip()
@@ -200,142 +209,67 @@ def web_scraper_tool(url: str) -> str:
         for element in soup(["script", "style", "nav", "footer", "header", "aside", "iframe"]):
             element.decompose()
 
-        clean_text = "\n".join(line.strip() for line in soup.get_text("\n", strip=True).splitlines() if line.strip())
+        text = soup.get_text(separator="\n", strip=True)
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        clean_text = "\n".join(lines)
+
         if len(clean_text) > WEB_SCRAPER_CHAR_LIMIT:
+            truncated = clean_text[:WEB_SCRAPER_CHAR_LIMIT]
             return (
-                f"{clean_text[:WEB_SCRAPER_CHAR_LIMIT]}\n\n"
-                f"[Content truncated to {WEB_SCRAPER_CHAR_LIMIT} characters. Original length: {len(clean_text)} characters]"
+                f"{truncated}\n\n"
+                f"[Content truncated to {WEB_SCRAPER_CHAR_LIMIT} characters. "
+                f"Original length: {len(clean_text)} characters]"
             )
-        return clean_text or "No readable content found on page"
+
+        return clean_text if clean_text else "No readable content found on page"
 
     except requests.Timeout:
         return f"Error: Request timed out after {WEB_SCRAPER_TIMEOUT} seconds for {url}"
     except requests.RequestException as exc:
-        return f"Error fetching {url}: {exc}"
+        return f"Error fetching {url}: {str(exc)}"
     except Exception as exc:
-        return f"Unexpected error processing {url}: {exc}"
+        return f"Unexpected error processing {url}: {str(exc)}"
 
 
 @tool
-def get_geological_image(description: str, image_type: str = "auto") -> str:
+def find_geological_images(topic: str) -> str:
     """
-    Fetch a geological image URL from reliable sources.
+    Provide links to reliable geological image resources.
     
     Args:
-        description: What to search for (e.g., "basalt thin section", "fault line diagram")
-        image_type: Type of image - "photo", "diagram", or "auto" (default: auto-detects)
+        topic: What to search for (e.g., "basalt", "subduction zone diagram", "quartz crystal")
     
     Returns:
-        Either a valid image URL, or a user-friendly error message explaining what happened
+        Formatted message with link to appropriate geology image resource
     """
-    if image_type not in {"auto", "photo", "diagram"}:
-        image_type = "auto"
-
-    if image_type == "auto":
-        image_type = "diagram" if _looks_like_diagram_request(description) else "photo"
-
-    # Build search query
-    query = f"{description} geology"
-    if image_type == "diagram":
-        query += " diagram schematic illustration"
+    topic_lower = topic.lower()
+    
+    # Determine best resource based on topic
+    if "mineral" in topic_lower or "crystal" in topic_lower or "gem" in topic_lower:
+        resource_name = "Mindat.org"
+        description = "comprehensive mineral database with thousands of photos"
+        search_url = f"https://www.mindat.org/search.php?search={topic.replace(' ', '+')}"
+    
+    elif any(word in topic_lower for word in ["diagram", "process", "cycle", "cross-section", "plate", "boundary", "structure"]):
+        resource_name = "USGS Image Gallery"
+        description = "professional diagrams and illustrations from the U.S. Geological Survey"
+        search_url = f"https://www.usgs.gov/media/images?title={topic.replace(' ', '+')}"
+    
+    elif any(word in topic_lower for word in ["rock", "outcrop", "formation", "sample"]):
+        resource_name = "Sandatlas"
+        description = "high-quality rock and mineral photographs with detailed descriptions"
+        search_url = f"https://www.sandatlas.org/?s={topic.replace(' ', '+')}"
+    
     else:
-        query += " photograph"
-
-    # Try Wikimedia first (best for scientific content)
-    wikimedia_url = _wikimedia_image_search(query)
-    if wikimedia_url:
-        logger.info(f"Found image on Wikimedia for: {description}")
-        return wikimedia_url
-
-    # Fallback to Tavily
-    tavily_url = _tavily_image_search(query)
-    if tavily_url:
-        logger.info(f"Found image via Tavily for: {description}")
-        return tavily_url
-
-    # No image found - return helpful message
-    logger.warning(f"No image found for: {description}")
-    return f"IMAGE_NOT_FOUND: I couldn't find a suitable {image_type} for '{description}'. I'll continue explaining without the image."
-
-
-def _looks_like_diagram_request(description: str) -> bool:
-    """Check if the description suggests a diagram/illustration vs a photo."""
-    keywords = {
-        "diagram", "cross-section", "cross section", "plate", "tectonic", "cycle", "process",
-        "structure", "layers", "boundary", "subduction", "illustration", "schematic", "model",
-        "formation", "crystal structure", "fault", "fold", "stratigraphic", "earth interior",
-        "mantle", "crust", "core", "convection", "mechanism", "how",
-    }
-    desc = description.lower()
-    return any(word in desc for word in keywords)
-
-
-def _wikimedia_image_search(query: str) -> Optional[str]:
-    """Search Wikimedia Commons for geological images."""
-    try:
-        response = requests.get(
-            "https://commons.wikimedia.org/w/api.php",
-            params={
-                "action": "query",
-                "format": "json",
-                "generator": "search",
-                "gsrnamespace": "6",
-                "gsrsearch": query,
-                "gsrlimit": "8",
-                "prop": "imageinfo",
-                "iiprop": "url|mime",
-                "iiurlwidth": "1200",
-            },
-            timeout=HTTP_TIMEOUT,
-        )
-        response.raise_for_status()
-        pages = (response.json().get("query") or {}).get("pages") or {}
-
-        for page in pages.values():
-            infos = page.get("imageinfo") or []
-            if not infos:
-                continue
-            info = infos[0]
-            mime = (info.get("mime") or "").lower()
-            if not mime.startswith("image/"):
-                continue
-
-            image_url = info.get("thumburl") or info.get("url")
-            if isinstance(image_url, str) and IMAGE_URL_RE.match(image_url):
-                return image_url.strip()
-    except Exception as exc:
-        logger.warning("Wikimedia search failed: %s", exc)
-
-    return None
-
-
-def _tavily_image_search(query: str) -> Optional[str]:
-    """Search for images using Tavily as fallback."""
-    try:
-        payload = tavily_search.invoke({"query": query})
-        candidates: list[str] = []
-
-        if isinstance(payload, dict):
-            if isinstance(payload.get("images"), list):
-                candidates.extend([x for x in payload["images"] if isinstance(x, str)])
-            if isinstance(payload.get("results"), list):
-                for item in payload["results"]:
-                    if isinstance(item, dict) and isinstance(item.get("images"), list):
-                        candidates.extend([x for x in item["images"] if isinstance(x, str)])
-        elif isinstance(payload, list):
-            for item in payload:
-                if isinstance(item, str):
-                    candidates.append(item)
-                elif isinstance(item, dict) and isinstance(item.get("images"), list):
-                    candidates.extend([x for x in item["images"] if isinstance(x, str)])
-
-        for url in candidates:
-            if IMAGE_URL_RE.match(url):
-                return url.strip()
-    except Exception as exc:
-        logger.warning("Tavily image search failed: %s", exc)
-
-    return None
+        resource_name = "Wikimedia Commons - Geology"
+        description = "free geological images and scientific illustrations"
+        search_url = f"https://commons.wikimedia.org/w/index.php?search={topic.replace(' ', '+')}+geology"
+    
+    return (
+        f"📸 To see images of '{topic}', visit **{resource_name}** ({description}):\n\n"
+        f"🔗 {search_url}\n\n"
+        f"This will show you high-quality, reliable images from a trusted geological source."
+    )
 
 
 @tool
@@ -344,14 +278,14 @@ def start_quiz_mode(topic: str, difficulty: str = "intermediate", num_questions:
     Start an interactive geology quiz on a specific topic.
     
     Args:
-        topic: The geological topic to quiz on (e.g., "plate tectonics", "igneous rocks", "minerals")
-        difficulty: Difficulty level - "easy", "intermediate", or "advanced" (default: intermediate)
-        num_questions: How many questions to generate, 1-5 (default: 3)
+        topic: The geological topic to quiz on (e.g., "plate tectonics", "igneous rocks")
+        difficulty: Difficulty level - "easy", "intermediate", or "advanced"
+        num_questions: How many questions to generate (1-5)
     
     Returns:
-        Instructions telling the AI to generate quiz questions and wait for answers
+        Instructions for generating quiz questions
     """
-    # Simple validation
+    # Validate inputs
     if num_questions < 1:
         num_questions = 1
     elif num_questions > 5:
@@ -375,8 +309,16 @@ def start_quiz_mode(topic: str, difficulty: str = "intermediate", num_questions:
 
 
 # Register all tools
-tools = [tavily_search, web_scraper_tool, get_geological_image, start_quiz_mode]
+tools = [
+    tavily_search,
+    web_scraper_tool,
+    find_geological_images,
+    start_quiz_mode,
+]
 
+# ═══════════════════════════════════════════════════════════════════════════
+# LANGGRAPH SETUP
+# ═══════════════════════════════════════════════════════════════════════════
 
 class State(TypedDict):
     messages: Annotated[list, add_messages]
@@ -394,8 +336,13 @@ llm = ChatOpenAI(
 
 
 def chatbot(state: State):
-    response = llm.invoke(state["messages"])
-    return {"messages": [response]}
+    """Main chatbot node."""
+    try:
+        response = llm.invoke(state["messages"])
+        return {"messages": [response]}
+    except Exception as exc:
+        logger.error("Error in chatbot node: %s", str(exc), exc_info=True)
+        raise RuntimeError(f"Error processing your request: {str(exc)}") from exc
 
 
 graph_builder.add_node("chatbot", chatbot)
@@ -406,8 +353,12 @@ graph_builder.set_entry_point("chatbot")
 graph = graph_builder.compile(checkpointer=MemorySaver())
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# MAIN AGENT FUNCTION
+# ═══════════════════════════════════════════════════════════════════════════
+
 def validate_input(user_input: str) -> tuple[bool, str]:
-    """Simple validation to catch empty or too-long inputs."""
+    """Validate user input."""
     if not user_input:
         return False, "Error: No input provided"
     if not isinstance(user_input, str):
@@ -415,54 +366,47 @@ def validate_input(user_input: str) -> tuple[bool, str]:
     if not user_input.strip():
         return False, "Error: Input is empty or only whitespace"
     if len(user_input) > MAX_INPUT_LENGTH:
-        return False, f"Error: Input exceeds maximum length of {MAX_INPUT_LENGTH} characters (got {len(user_input)})"
+        return False, (
+            f"Error: Input exceeds maximum length of {MAX_INPUT_LENGTH} characters "
+            f"(got {len(user_input)})"
+        )
     return True, ""
 
 
 async def run_agent(user_input: str, thread_id: str) -> AsyncGenerator[str, None]:
-    """
-    Main function that runs the Rocky agent and streams responses.
-    
-    This handles:
-    - Input validation
-    - Streaming chat responses from the LLM
-    - Displaying images when the image tool is called
-    - Gracefully handling errors
-    """
+    """Stream generated tokens for the geology chatbot."""
     is_valid, error_msg = validate_input(user_input)
     if not is_valid:
+        logger.warning("Invalid input: %s", error_msg)
         yield error_msg
         return
 
     try:
         config = {"configurable": {"thread_id": thread_id}}
         state = graph.get_state(config)
-        messages = [("user", user_input)] if state.values.get("messages") else [("system", SYSTEM_PROMPT), ("user", user_input)]
+        is_new_conversation = not state.values.get("messages")
 
-        async for event in graph.astream_events({"messages": messages}, config=config, version="v2"):
+        if is_new_conversation:
+            messages = [("system", SYSTEM_PROMPT), ("user", user_input)]
+        else:
+            messages = [("user", user_input)]
+
+        async for event in graph.astream_events(
+            {"messages": messages},
+            config=config,
+            version="v2",
+        ):
             kind = event.get("event")
 
-            # Stream text from the LLM
             if kind == "on_chat_model_stream":
                 content = event["data"]["chunk"].content
                 if content:
                     yield content
 
-            # Handle image tool results
-            elif kind == "on_tool_end" and event.get("name") == "get_geological_image":
-                image_result = str(getattr(event["data"].get("output"), "content", event["data"].get("output"))).strip()
-                
-                # Check if we got a real image URL
-                if IMAGE_URL_RE.match(image_result):
-                    # Display the image in markdown
-                    yield f"\n\n![Geological Image]({image_result})\n\n"
-                
-                # Check if image search failed
-                elif "IMAGE_NOT_FOUND" in image_result:
-                    # Extract the friendly message and show it to user
-                    message = image_result.replace("IMAGE_NOT_FOUND: ", "")
-                    yield f"\n\n_({message})_\n\n"
-
     except Exception as exc:
-        logger.error("Error in run_agent for thread %s: %s", thread_id, exc, exc_info=True)
-        yield f"\n\n❌ An error occurred: {exc}\n\nPlease try rephrasing your question or start a new chat."
+        error_message = (
+            f"\n\n❌ An error occurred: {str(exc)}\n\n"
+            "Please try rephrasing your question or start a new chat."
+        )
+        logger.error("Error in run_agent for thread %s: %s", thread_id, str(exc), exc_info=True)
+        yield error_message
