@@ -234,41 +234,43 @@ def web_scraper_tool(url: str) -> str:
 @tool
 def find_geological_images(topic: str) -> str:
     """
-    Provide links to reliable geological image resources.
+    Provide a Google Images search link for geological topics.
     
     Args:
         topic: What to search for (e.g., "basalt", "subduction zone diagram", "quartz crystal")
     
     Returns:
-        Formatted message with link to appropriate geology image resource
+        Google Images search link with geology-specific filters
     """
     topic_lower = topic.lower()
     
-    # Determine best resource based on topic
+    # Build a targeted search query
     if "mineral" in topic_lower or "crystal" in topic_lower or "gem" in topic_lower:
-        resource_name = "Mindat.org"
-        description = "comprehensive mineral database with thousands of photos"
-        search_url = f"https://www.mindat.org/search.php?search={topic.replace(' ', '+')}"
+        search_query = f"{topic} mineral geology specimen"
+        context = "You'll find photos of actual mineral specimens and crystals."
     
-    elif any(word in topic_lower for word in ["diagram", "process", "cycle", "cross-section", "plate", "boundary", "structure"]):
-        resource_name = "USGS Image Gallery"
-        description = "professional diagrams and illustrations from the U.S. Geological Survey"
-        search_url = f"https://www.usgs.gov/media/images?title={topic.replace(' ', '+')}"
+    elif any(word in topic_lower for word in ["diagram", "process", "cycle", "cross-section", "cross section", "plate", "boundary", "structure", "how"]):
+        search_query = f"{topic} geology diagram illustration"
+        context = "You'll find educational diagrams and illustrations."
     
-    elif any(word in topic_lower for word in ["rock", "outcrop", "formation", "sample"]):
-        resource_name = "Sandatlas"
-        description = "high-quality rock and mineral photographs with detailed descriptions"
-        search_url = f"https://www.sandatlas.org/?s={topic.replace(' ', '+')}"
+    elif any(word in topic_lower for word in ["rock", "outcrop", "formation", "sample", "stone"]):
+        search_query = f"{topic} rock geology sample"
+        context = "You'll find photos of real rock samples and formations."
     
     else:
-        resource_name = "Wikimedia Commons - Geology"
-        description = "free geological images and scientific illustrations"
-        search_url = f"https://commons.wikimedia.org/w/index.php?search={topic.replace(' ', '+')}+geology"
+        search_query = f"{topic} geology"
+        context = "You'll find a variety of relevant geological images."
+    
+    # URL encode the search query
+    encoded_query = search_query.replace(' ', '+')
+    
+    # Google Images search URL
+    google_images_url = f"https://www.google.com/search?q={encoded_query}&tbm=isch"
     
     return (
-        f"📸 To see images of '{topic}', visit **{resource_name}** ({description}):\n\n"
-        f"🔗 {search_url}\n\n"
-        f"This will show you high-quality, reliable images from a trusted geological source."
+        f"📸 **Search Google Images for '{topic}'**\n\n"
+        f"{google_images_url}\n\n"
+        f"_{context} Click the link to see high-quality images._"
     )
 
 
