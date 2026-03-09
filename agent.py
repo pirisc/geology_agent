@@ -1,4 +1,4 @@
-from typing import Annotated, TypedDict, AsyncGenerator, Any, Optional
+from typing import Annotated, TypedDict, AsyncGenerator
 import logging
 import os
 import re
@@ -24,6 +24,141 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SYSTEM PROMPT
+# ═══════════════════════════════════════════════════════════════════════════
+
+SYSTEM_PROMPT = """
+You are Rocky, an AI assistant specializing in Geology and Earth Sciences.
+
+You have expert-level knowledge across all geological disciplines: petrology, 
+mineralogy, sedimentology, stratigraphy, structural geology, tectonics, geophysics, 
+geomorphology, paleontology, hydrogeology, geochemistry, and applied fields like 
+engineering geology and resource exploration.
+
+Your purpose is to make geological science accessible, accurate, and engaging—
+whether explaining plate tectonics to a curious student or discussing stable 
+isotope geochemistry with a researcher.
+
+═════════════════════════════════════════════════════════════════════════
+--------------------
+FORMATTING GUIDELINES
+--------------------
+Adapt your response style to the question's complexity and the user's needs:
+
+- For simple questions: Provide direct, conversational answers in natural prose.
+- For complex topics: Use clear paragraphs with structure when it aids understanding.
+- Use lists/bullets when comparing multiple items, listing steps, or when requested.
+- Define technical terms naturally within your explanation.
+- Lead with the most important information.
+- Avoid over-formatting (excessive bold, headers, or lists) in typical explanations.
+
+-----------------------
+USING IMAGES
+-----------------------
+You have a tool called 'get_geological_image' that automatically fetches the right type of image:
+
+**The tool is smart - just describe what you want:**
+- "tectonic plate boundaries diagram" → fetches diagram
+- "basalt rock sample" → fetches photo  
+- "rock cycle diagram" → fetches diagram
+- "granite outcrop" → fetches photo
+
+**Be specific in your descriptions:**
+- Good: "subduction zone cross-section diagram"
+- Good: "sedimentary rock layers in cliff"
+- Bad: Generic terms like "rocks" or "geology"
+
+**How to use it naturally:**
+- Simply mention you're showing an image: "Let me show you a diagram of plate boundaries"
+- The image will display automatically - you don't need to describe it in detail
+- Use images to enhance understanding, especially for visual concepts
+
+-----------------------
+SCIENTIFIC APPROACH
+-----------------------
+- Base answers on established scientific consensus and evidence.
+- Distinguish clearly between established knowledge, leading theories, and speculation.
+- When discussing evolving topics, present multiple perspectives from the literature.
+- Cite the type of evidence supporting claims (e.g., "radiometric dating shows...", 
+  "seismic data indicates...", "field observations suggest...").
+- If information is uncertain or outside your knowledge, say so explicitly.
+- For ambiguous questions, state your assumptions or ask for clarification.
+- If 'tavily_search' is used, ALWAYS cite sources with author/publication when available.
+- Prefer peer-reviewed sources and official geological surveys.
+
+-------------------------------
+PROACTIVE ENGAGEMENT & QUESTIONS
+-------------------------------
+After answering the user's question, enrich the conversation by:
+
+- Asking 1-2 relevant follow-up questions that deepen understanding of the topic.
+- Connecting to related geological concepts they might find interesting.
+- Exploring the "why" or "how" behind the phenomena discussed.
+- Inquiring about their specific context (e.g., location, academic level, project goals) 
+  when it would help tailor future responses.
+- Suggesting related topics worth exploring based on their interests.
+
+Examples of good follow-up questions:
+- "Are you interested in how this process varies in different tectonic settings?"
+- "Would you like to know how geologists actually measure this in the field?"
+- "Is this for a specific region or project you're working on?"
+- "Have you encountered [related concept] before? It's closely connected to this."
+- "What sparked your interest in this particular aspect of geology?"
+
+**STUDY MODE**: When users want to test their knowledge:
+1. Generate 2-3 questions based on the discussed topic
+2. Wait for their answers
+3. Provide constructive feedback on each answer
+4. Explain correct answers with context
+5. Ask if they want more questions or to move to a new topic
+
+Keep follow-ups natural and conversational—limit to 1-2 questions per response 
+to avoid overwhelming the user.
+
+----------------
+SAFETY GUIDELINES
+----------------
+When discussing topics with safety implications:
+
+- Provide scientific explanations of hazards and processes freely.
+- Explain risk assessment principles and general mitigation strategies.
+- Do NOT provide operational instructions for:
+  * Explosive handling or manufacturing
+  * Unsupervised drilling/excavation operations
+  * Entering hazardous environments (active volcanoes, unstable mines)
+  * Professional fieldwork requiring specialized safety training
+
+- For hazard preparedness: Offer general awareness and direct users to 
+  official emergency management resources.
+- State when professional expertise (licensed geologist, engineer) is required.
+- Educational discussions of hazardous topics for learning purposes are appropriate.
+
+--------------------------
+PRACTICAL APPLICATIONS
+--------------------------
+When users ask about applied geology:
+
+- Provide educational explanations of methods and principles.
+- Explain what professionals consider in real scenarios.
+- Clarify when questions require site-specific data, professional analysis, 
+  or regulatory compliance.
+- Distinguish between educational explanation and actionable consulting advice.
+
+----------------------
+INTERACTION STYLE
+----------------------
+- Gauge the user's expertise from their question and adjust accordingly.
+- For ambiguous questions, make reasonable assumptions but state them.
+- Use analogies and real-world examples to make abstract concepts concrete.
+- Be enthusiastic—geology is fascinating!
+- If a question falls outside geology, briefly acknowledge and optionally redirect.
+
+Your primary goal is to help users understand Earth science deeply, accurately, 
+and safely—while fostering curiosity through thoughtful questions.
+"""
+
 # ═══════════════════════════════════════════════════════════════════════════
 # SETUP & CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════
@@ -33,19 +168,12 @@ load_dotenv(find_dotenv(), override=True)
 MAX_INPUT_LENGTH = 10000
 WEB_SCRAPER_CHAR_LIMIT = 8000
 WEB_SCRAPER_TIMEOUT = 20
-IMAGE_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
-SYSTEM_PROMPT = """
-You are Rocky, an AI assistant specializing in Geology and Earth Sciences.
-Be accurate, clear, and educational.
-"""
 
 # Tool 1: Web Search with Tavily
-# NOTE: include_images=True is required for image fallback extraction.
 tavily_search = TavilySearchResults(
     max_results=5,
     search_depth="advanced",
-    include_images=True,
     include_answer=True,
     include_raw_content=False,
 )
@@ -107,68 +235,71 @@ def web_scraper_tool(url: str) -> str:
 
 
 @tool
-def get_geological_image(description: str, image_type: str = "auto") -> str:
+def get_geological_image(description: str) -> str:
     """
-    Fetch geological images (photos and diagrams).
-
-    image_type: "photo", "diagram", or "auto"
+    Fetch geological images - automatically chooses photos or diagrams based on description.
+    
+    Fetches diagrams for: processes, cross-sections, cycles, plate tectonics, structures
+    Fetches photos for: rock samples, minerals, formations, outcrops
+    
+    Args:
+        description: What to search for (e.g., 'granite rock sample', 'subduction zone diagram')
+    
+    Returns:
+        Image URL or error message
     """
     try:
-        if image_type == "auto":
-            diagram_keywords = [
-                "diagram", "cross-section", "cross section", "plate", "tectonic",
-                "cycle", "process", "structure of", "layers", "boundary", "subduction",
-                "illustration", "schematic", "model", "system", "formation process",
-                "crystal structure", "fault", "fold", "stratigraphic", "earth interior",
-                "mantle", "crust", "core", "convection", "how", "mechanism",
-            ]
-            description_lower = description.lower()
-            image_type = "diagram" if any(k in description_lower for k in diagram_keywords) else "photo"
-
+        # Simple auto-detection: look for diagram keywords
+        diagram_keywords = ["diagram", "cross-section", "cycle", "process", "plate", "boundary", "structure"]
+        needs_diagram = any(keyword in description.lower() for keyword in diagram_keywords)
+        
+        image_type = "diagram" if needs_diagram else "photo"
+        logger.info(f"Fetching {image_type} for: {description}")
+        
         if image_type == "diagram":
-            return fetch_geological_diagram(description)
-        return fetch_geological_photo(description)
-
+            return _fetch_from_wikimedia(description)
+        else:
+            return _fetch_from_unsplash(description)
+            
     except Exception as exc:
-        logger.error("Error in get_geological_image: %s", exc)
-        return f"IMAGE_ERROR: {str(exc)}"
+        logger.error(f"Image fetch error: {exc}")
+        return f"NO_IMAGE_FOUND: {description}"
 
 
-def fetch_geological_photo(description: str) -> str:
-    """Fetch real photographs from Unsplash; fallback to diagram search."""
+def _fetch_from_unsplash(description: str) -> str:
+    """Fetch photos from Unsplash API."""
+    unsplash_key = os.getenv("UNSPLASH_ACCESS_KEY")
+    if not unsplash_key:
+        logger.warning("No Unsplash key found")
+        return f"NO_IMAGE_FOUND: {description}"
+    
     try:
-        unsplash_key = os.getenv("UNSPLASH_ACCESS_KEY")
-        if not unsplash_key:
-            logger.warning("UNSPLASH_ACCESS_KEY not found, using diagram/web fallback")
-            return fetch_geological_diagram(description)
-
         response = requests.get(
             "https://api.unsplash.com/search/photos",
             params={
-                "query": f"{description} geology rock mineral",
+                "query": f"{description} geology",
                 "client_id": unsplash_key,
-                "per_page": 3,
-                "orientation": "landscape",
-                "content_filter": "high",
+                "per_page": 5,
             },
             timeout=10,
         )
         response.raise_for_status()
         data = response.json()
-
-        results = data.get("results") or []
+        
+        results = data.get("results", [])
         if results:
             return results[0]["urls"]["regular"]
-
-        return fetch_geological_diagram(description)
-
+        
+        logger.info(f"No Unsplash results for: {description}")
+        return f"NO_IMAGE_FOUND: {description}"
+        
     except Exception as exc:
-        logger.error("Unsplash error: %s", exc)
-        return fetch_geological_diagram(description)
+        logger.error(f"Unsplash error: {exc}")
+        return f"NO_IMAGE_FOUND: {description}"
 
 
-def fetch_geological_diagram(description: str) -> str:
-    """Fetch geological diagrams from Wikimedia, then Tavily fallback."""
+def _fetch_from_wikimedia(description: str) -> str:
+    """Fetch diagrams from Wikimedia Commons."""
     try:
         response = requests.get(
             "https://commons.wikimedia.org/w/api.php",
@@ -178,84 +309,29 @@ def fetch_geological_diagram(description: str) -> str:
                 "generator": "search",
                 "gsrnamespace": "6",
                 "gsrsearch": f"{description} geology diagram",
-                "gsrlimit": "5",
+                "gsrlimit": 5,
                 "prop": "imageinfo",
-                "iiprop": "url|size|mime",
-                "iiurlwidth": "1000",
+                "iiprop": "url",
             },
             timeout=10,
         )
         response.raise_for_status()
         data = response.json()
-
-        pages = (data.get("query") or {}).get("pages") or {}
+        
+        pages = data.get("query", {}).get("pages", {})
         for page in pages.values():
-            imageinfo = page.get("imageinfo") or []
-            if not imageinfo:
-                continue
-            info = imageinfo[0]
-            image_url = info.get("thumburl") or info.get("url")
-            if isinstance(image_url, str) and IMAGE_URL_RE.match(image_url):
-                return image_url
-
-        return search_geological_image_fallback(description, prefer_diagrams=True)
-
+            imageinfo = page.get("imageinfo", [])
+            if imageinfo:
+                url = imageinfo[0].get("url", "")
+                if url.startswith("http"):
+                    return url
+        
+        logger.info(f"No Wikimedia results for: {description}")
+        return f"NO_IMAGE_FOUND: {description}")
+        
     except Exception as exc:
-        logger.error("Wikimedia error: %s", exc)
-        return search_geological_image_fallback(description, prefer_diagrams=True)
-
-
-def _first_valid_image_url(payload: Any) -> Optional[str]:
-    """Extract first plausible image URL from Tavily output (dict or list)."""
-    candidates: list[str] = []
-
-    if isinstance(payload, dict):
-        top_images = payload.get("images")
-        if isinstance(top_images, list):
-            candidates.extend([x for x in top_images if isinstance(x, str)])
-
-        results = payload.get("results")
-        if isinstance(results, list):
-            for item in results:
-                if isinstance(item, dict):
-                    imgs = item.get("images")
-                    if isinstance(imgs, list):
-                        candidates.extend([x for x in imgs if isinstance(x, str)])
-
-    elif isinstance(payload, list):
-        for item in payload:
-            if isinstance(item, dict):
-                imgs = item.get("images")
-                if isinstance(imgs, list):
-                    candidates.extend([x for x in imgs if isinstance(x, str)])
-            elif isinstance(item, str):
-                candidates.append(item)
-
-    for url in candidates:
-        if IMAGE_URL_RE.match(url):
-            return url.strip()
-    return None
-
-
-def search_geological_image_fallback(description: str, prefer_diagrams: bool = False) -> str:
-    """Fallback image search using Tavily with robust response parsing."""
-    try:
-        if prefer_diagrams:
-            search_query = f"{description} diagram illustration geology educational"
-        else:
-            search_query = f"{description} geology photo high resolution"
-
-        # Use explicit object payload for consistency.
-        results = tavily_search.invoke({"query": search_query})
-        image_url = _first_valid_image_url(results)
-        if image_url:
-            return image_url
-
+        logger.error(f"Wikimedia error: {exc}")
         return f"NO_IMAGE_FOUND: {description}"
-
-    except Exception as exc:
-        logger.error("Fallback search error: %s", exc)
-        return f"IMAGE_ERROR: {str(exc)}"
 
 
 @tool
@@ -359,9 +435,9 @@ async def run_agent(user_input: str, thread_id: str) -> AsyncGenerator[str, None
                         image_url = image_url.content
                     image_url = str(image_url).strip()
 
-                    if IMAGE_URL_RE.match(image_url):
+                    if image_url.startswith("http"):
                         yield f"\n\n![Geological Image]({image_url})\n\n"
-                    elif "NO_IMAGE_FOUND" in image_url or "IMAGE_ERROR" in image_url:
+                    elif "NO_IMAGE_FOUND" in image_url:
                         logger.warning("Image fetch failed: %s", image_url)
 
     except Exception as exc:
