@@ -420,10 +420,25 @@ async def run_agent(user_input: str, thread_id: str) -> AsyncGenerator[str, None
         ):
             kind = event.get("event")
 
+            # Stream LLM text output
             if kind == "on_chat_model_stream":
                 content = event["data"]["chunk"].content
                 if content:
                     yield content
+            
+            # Handle tool outputs (especially images)
+            elif kind == "on_tool_end":
+                tool_name = event.get("name", "")
+                if tool_name == "find_geological_images":
+                    # Get the tool output
+                    output = event["data"].get("output")
+                    if hasattr(output, "content"):
+                        output = output.content
+                    output = str(output).strip()
+                    
+                    # Stream the tool output (which includes image markdown or links)
+                    if output:
+                        yield f"\n\n{output}\n\n"
 
     except Exception as exc:
         error_message = (
