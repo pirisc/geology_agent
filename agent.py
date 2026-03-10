@@ -349,7 +349,7 @@ class State(TypedDict):
 graph_builder = StateGraph(State)
 
 llm = ChatOpenAI(
-    model="gpt-4",
+    model="gpt-4.1-nano",
     temperature=0.7,
     presence_penalty=0.6,
     frequency_penalty=0.5,
