@@ -1,12 +1,8 @@
-from __future__ import annotations
-
+from typing import Annotated, TypedDict, AsyncGenerator
 import logging
-from typing import Annotated, AsyncGenerator, TypedDict
-from urllib.parse import quote_plus
 
-import requests
 from bs4 import BeautifulSoup
-from dotenv import find_dotenv, load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from langchain.tools import tool
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_openai import ChatOpenAI
@@ -14,6 +10,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
+import requests
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LOGGING SETUP
@@ -31,20 +28,24 @@ logger = logging.getLogger(__name__)
 
 load_dotenv(find_dotenv(), override=True)
 
-MAX_INPUT_LENGTH = 10_000
-WEB_SCRAPER_CHAR_LIMIT = 8_000
+MAX_INPUT_LENGTH = 10000
+WEB_SCRAPER_CHAR_LIMIT = 8000
 WEB_SCRAPER_TIMEOUT = 20
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SYSTEM PROMPT
+# ═══════════════════════════════════════════════════════════════════════════
 
 SYSTEM_PROMPT = """
 You are Rocky, an AI assistant specializing in Geology and Earth Sciences.
 
-You have expert-level knowledge across all geological disciplines: petrology,
-mineralogy, sedimentology, stratigraphy, structural geology, tectonics, geophysics,
-geomorphology, paleontology, hydrogeology, geochemistry, and applied fields like
+You have expert-level knowledge across all geological disciplines: petrology, 
+mineralogy, sedimentology, stratigraphy, structural geology, tectonics, geophysics, 
+geomorphology, paleontology, hydrogeology, geochemistry, and applied fields like 
 engineering geology and resource exploration.
 
 Your purpose is to make geological science accessible, accurate, and engaging—
-whether explaining plate tectonics to a curious student or discussing stable
+whether explaining plate tectonics to a curious student or discussing stable 
 isotope geochemistry with a researcher.
 
 --------------------
@@ -84,7 +85,7 @@ SCIENTIFIC APPROACH
 - Base answers on established scientific consensus and evidence.
 - Distinguish clearly between established knowledge, leading theories, and speculation.
 - When discussing evolving topics, present multiple perspectives from the literature.
-- Cite the type of evidence supporting claims (e.g., "radiometric dating shows...",
+- Cite the type of evidence supporting claims (e.g., "radiometric dating shows...", 
   "seismic data indicates...", "field observations suggest...").
 - If information is uncertain or outside your knowledge, say so explicitly.
 - For ambiguous questions, state your assumptions or ask for clarification.
@@ -99,7 +100,7 @@ After answering the user's question, enrich the conversation by:
 - Asking 1-2 relevant follow-up questions that deepen understanding of the topic.
 - Connecting to related geological concepts they might find interesting.
 - Exploring the "why" or "how" behind the phenomena discussed.
-- Inquiring about their specific context (e.g., location, academic level, project goals)
+- Inquiring about their specific context (e.g., location, academic level, project goals) 
   when it would help tailor future responses.
 - Suggesting related topics worth exploring based on their interests.
 
@@ -117,7 +118,7 @@ Examples of good follow-up questions:
 4. Explain correct answers with context
 5. Ask if they want more questions or to move to a new topic
 
-Keep follow-ups natural and conversational—limit to 1-2 questions per response
+Keep follow-ups natural and conversational—limit to 1-2 questions per response 
 to avoid overwhelming the user.
 
 ----------------
@@ -133,8 +134,8 @@ When discussing topics with safety implications:
   * Entering hazardous environments (active volcanoes, unstable mines)
   * Professional fieldwork requiring specialized safety training
 
-- For hazard preparedness: Offer general awareness and direct users to
-official emergency management resources.
+- For hazard preparedness: Offer general awareness and direct users to 
+  official emergency management resources.
 - State when professional expertise (licensed geologist, engineer) is required.
 - Educational discussions of hazardous topics for learning purposes are appropriate.
 
@@ -145,8 +146,8 @@ When users ask about applied geology:
 
 - Provide educational explanations of methods and principles.
 - Explain what professionals consider in real scenarios.
-- Clarify when questions require site-specific data, professional analysis,
-or regulatory compliance.
+- Clarify when questions require site-specific data, professional analysis, 
+  or regulatory compliance.
 - Distinguish between educational explanation and actionable consulting advice.
 
 ----------------------
@@ -158,10 +159,9 @@ INTERACTION STYLE
 - Be enthusiastic—geology is fascinating!
 - If a question falls outside geology, briefly acknowledge and optionally redirect.
 
-Your primary goal is to help users understand Earth science deeply, accurately,
+Your primary goal is to help users understand Earth science deeply, accurately, 
 and safely—while fostering curiosity through thoughtful questions.
-""".strip()
-
+"""
 
 # ═══════════════════════════════════════════════════════════════════════════
 # TOOLS
@@ -176,20 +176,10 @@ tavily_search = TavilySearchResults(
 )
 
 
-def _safe_text_from_html(html: str) -> str:
-    soup = BeautifulSoup(html, "html.parser")
-    for element in soup(["script", "style", "nav", "footer", "header", "aside", "iframe"]):
-        element.decompose()
-
-    text = soup.get_text(separator="\n", strip=True)
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    return "\n".join(lines)
-
-
 @tool
 def web_scraper_tool(url: str) -> str:
     """Scrape a webpage and return cleaned text content."""
-    if not isinstance(url, str) or not url.strip():
+    if not url or not isinstance(url, str):
         return "Error: Invalid URL provided"
 
     url = url.strip()
@@ -215,9 +205,13 @@ def web_scraper_tool(url: str) -> str:
         if "text/html" not in content_type and "text/plain" not in content_type:
             return f"Error: URL returned non-text content type: {content_type}"
 
-        clean_text = _safe_text_from_html(response.text)
-        if not clean_text:
-            return "No readable content found on page"
+        soup = BeautifulSoup(response.text, "html.parser")
+        for element in soup(["script", "style", "nav", "footer", "header", "aside", "iframe"]):
+            element.decompose()
+
+        text = soup.get_text(separator="\n", strip=True)
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        clean_text = "\n".join(lines)
 
         if len(clean_text) > WEB_SCRAPER_CHAR_LIMIT:
             truncated = clean_text[:WEB_SCRAPER_CHAR_LIMIT]
@@ -227,83 +221,122 @@ def web_scraper_tool(url: str) -> str:
                 f"Original length: {len(clean_text)} characters]"
             )
 
-        return clean_text
+        return clean_text if clean_text else "No readable content found on page"
 
     except requests.Timeout:
         return f"Error: Request timed out after {WEB_SCRAPER_TIMEOUT} seconds for {url}"
     except requests.RequestException as exc:
-        return f"Error fetching {url}: {exc}"
-    except Exception as exc:  # defensive catch for parser edge-cases
-        return f"Unexpected error processing {url}: {exc}"
+        return f"Error fetching {url}: {str(exc)}"
+    except Exception as exc:
+        return f"Unexpected error processing {url}: {str(exc)}"
 
 
 @tool
 def find_geological_images(topic: str) -> str:
-    """Provide a Google Images search link for geological topics."""
-    if not isinstance(topic, str) or not topic.strip():
-        return "Error: Topic must be a non-empty string"
-
-    topic = topic.strip()
+    """
+    Find and display geological images from Google Images.
+    
+    Args:
+        topic: What to search for (e.g., "basalt", "subduction zone diagram", "quartz crystal")
+    
+    Returns:
+        Markdown-formatted image or fallback link
+    """
     topic_lower = topic.lower()
-
-    if any(k in topic_lower for k in ["mineral", "crystal", "gem"]):
+    
+    # Build a targeted search query
+    if "mineral" in topic_lower or "crystal" in topic_lower or "gem" in topic_lower:
         search_query = f"{topic} mineral geology specimen"
-        context = "You'll find photos of actual mineral specimens and crystals."
-    elif any(
-        word in topic_lower
-        for word in [
-            "diagram",
-            "process",
-            "cycle",
-            "cross-section",
-            "cross section",
-            "plate",
-            "boundary",
-            "structure",
-            "how",
-        ]
-    ):
+    elif any(word in topic_lower for word in ["diagram", "process", "cycle", "cross-section", "cross section", "plate", "boundary", "structure", "how"]):
         search_query = f"{topic} geology diagram illustration"
-        context = "You'll find educational diagrams and illustrations."
     elif any(word in topic_lower for word in ["rock", "outcrop", "formation", "sample", "stone"]):
         search_query = f"{topic} rock geology sample"
-        context = "You'll find photos of real rock samples and formations."
     else:
         search_query = f"{topic} geology"
-        context = "You'll find a variety of relevant geological images."
-
-    google_images_url = f"https://www.google.com/search?q={quote_plus(search_query)}&tbm=isch"
+    
+    # Try to get image from Google using Tavily (which can search Google)
+    try:
+        # Use tavily to search, which will return images from various sources including Google
+        results = tavily_search.invoke({"query": search_query})
+        
+        # Try to extract an image URL from results
+        image_url = None
+        if isinstance(results, dict):
+            # Check for images in the response
+            if "images" in results and results["images"]:
+                image_url = results["images"][0]
+            # Also check in results items
+            elif "results" in results and results["results"]:
+                for result in results["results"]:
+                    if isinstance(result, dict) and "images" in result and result["images"]:
+                        image_url = result["images"][0]
+                        break
+        
+        if image_url and image_url.startswith("http"):
+            # Return the image in markdown format so it displays in chat
+            encoded_query = search_query.replace(' ', '+')
+            google_search_url = f"https://www.google.com/search?q={encoded_query}&tbm=isch"
+            return (
+                f"![{topic}]({image_url})\n\n"
+                f"_See more images: [Google Images search for '{topic}']({google_search_url})_"
+            )
+    
+    except Exception as e:
+        logger.warning(f"Failed to fetch image for '{topic}': {e}")
+    
+    # Fallback: just provide the Google Images link
+    encoded_query = search_query.replace(' ', '+')
+    google_images_url = f"https://www.google.com/search?q={encoded_query}&tbm=isch"
+    
     return (
-        f"📸 **Search Google Images for '{topic}'**\n\n"
-        f"{google_images_url}\n\n"
-        f"_{context} Click the link to see high-quality images._"
+        f"📸 **[View images of '{topic}' on Google Images]({google_images_url})**\n\n"
+        f"_Click to see high-quality geological images._"
     )
 
 
 @tool
 def start_quiz_mode(topic: str, difficulty: str = "intermediate", num_questions: int = 3) -> str:
-    """Start an interactive geology quiz on a specific topic."""
-    num_questions = min(max(num_questions, 1), 5)
-
-    difficulty = difficulty.lower().strip()
+    """
+    Start an interactive geology quiz on a specific topic.
+    
+    Args:
+        topic: The geological topic to quiz on (e.g., "plate tectonics", "igneous rocks")
+        difficulty: Difficulty level - "easy", "intermediate", or "advanced"
+        num_questions: How many questions to generate (1-5)
+    
+    Returns:
+        Instructions for generating quiz questions
+    """
+    # Validate inputs
+    if num_questions < 1:
+        num_questions = 1
+    elif num_questions > 5:
+        num_questions = 5
+    
+    difficulty = difficulty.lower()
     if difficulty not in ["easy", "intermediate", "advanced"]:
         difficulty = "intermediate"
-
+    
     return (
-        "🎯 QUIZ MODE ACTIVATED\n\n"
+        f"🎯 QUIZ MODE ACTIVATED\n\n"
         f"Generate {num_questions} {difficulty}-level multiple-choice questions about '{topic}'.\n\n"
-        "Format:\n"
-        "- Number each question clearly\n"
-        "- Provide 4 options (A, B, C, D) for each\n"
-        "- Make questions test understanding, not just memorization\n"
-        "- After presenting all questions, WAIT for the user to answer\n"
-        "- Then provide feedback and explanations for each answer\n\n"
-        "End with: 'Take your time! Reply with your answers (e.g., 1-A, 2-C, 3-B) when ready.'"
+        f"Format:\n"
+        f"- Number each question clearly\n"
+        f"- Provide 4 options (A, B, C, D) for each\n"
+        f"- Make questions test understanding, not just memorization\n"
+        f"- After presenting all questions, WAIT for the user to answer\n"
+        f"- Then provide feedback and explanations for each answer\n\n"
+        f"End with: 'Take your time! Reply with your answers (e.g., 1-A, 2-C, 3-B) when ready.'"
     )
 
 
-tools = [tavily_search, web_scraper_tool, find_geological_images, start_quiz_mode]
-
+# Register all tools
+tools = [
+    tavily_search,
+    web_scraper_tool,
+    find_geological_images,
+    start_quiz_mode,
+]
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LANGGRAPH SETUP
@@ -330,8 +363,8 @@ def chatbot(state: State):
         response = llm.invoke(state["messages"])
         return {"messages": [response]}
     except Exception as exc:
-        logger.error("Error in chatbot node: %s", exc, exc_info=True)
-        raise RuntimeError(f"Error processing your request: {exc}") from exc
+        logger.error("Error in chatbot node: %s", str(exc), exc_info=True)
+        raise RuntimeError(f"Error processing your request: {str(exc)}") from exc
 
 
 graph_builder.add_node("chatbot", chatbot)
@@ -348,6 +381,8 @@ graph = graph_builder.compile(checkpointer=MemorySaver())
 
 def validate_input(user_input: str) -> tuple[bool, str]:
     """Validate user input."""
+    if not user_input:
+        return False, "Error: No input provided"
     if not isinstance(user_input, str):
         return False, "Error: Input must be a string"
     if not user_input.strip():
@@ -373,20 +408,27 @@ async def run_agent(user_input: str, thread_id: str) -> AsyncGenerator[str, None
         state = graph.get_state(config)
         is_new_conversation = not state.values.get("messages")
 
-        messages = [("user", user_input)]
         if is_new_conversation:
-            messages.insert(0, ("system", SYSTEM_PROMPT))
+            messages = [("system", SYSTEM_PROMPT), ("user", user_input)]
+        else:
+            messages = [("user", user_input)]
 
-        async for event in graph.astream_events({"messages": messages}, config=config, version="v2"):
-            if event.get("event") == "on_chat_model_stream":
+        async for event in graph.astream_events(
+            {"messages": messages},
+            config=config,
+            version="v2",
+        ):
+            kind = event.get("event")
+
+            if kind == "on_chat_model_stream":
                 content = event["data"]["chunk"].content
                 if content:
                     yield content
 
     except Exception as exc:
         error_message = (
-            f"\n\n❌ An error occurred: {exc}\n\n"
+            f"\n\n❌ An error occurred: {str(exc)}\n\n"
             "Please try rephrasing your question or start a new chat."
         )
-        logger.error("Error in run_agent for thread %s: %s", thread_id, exc, exc_info=True)
+        logger.error("Error in run_agent for thread %s: %s", thread_id, str(exc), exc_info=True)
         yield error_message
