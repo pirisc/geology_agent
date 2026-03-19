@@ -1,0 +1,24 @@
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+langchain>=0.1.16
+langchain-openai>=0.0.8
+langchain-community>=0.0.32
+langgraph>=0.1.6
+langsmith>=0.1.17,<0.2
+beautifulsoup4==4.12.3
+requests==2.31.0
+tavily-python>=0.3.5
+python-dotenv==1.0.0
+gunicorn==21.2.0
+langgraph-checkpoint-postgres
+langgraph-checkpoint-sqlite
+psycopg2-binary
+psycopg[pool]
+
+# For RAG / Knowledge Base
+langchain-chroma
+chromadb
+tiktoken
+pypdf
+langchain-community

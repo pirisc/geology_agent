@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Environment variables
+.env
+.env.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database files (local only)
+*.db
+*.sqlite
+*.sqlite3
+
+# Database files (local only)
+*.db
+*.sqlite
+*.sqlite3
+
+# ALLOW the geology knowledge base files
+!geology_kb/*.db
+!geology_kb/**/*.db
+
+# Logs
+*.log
