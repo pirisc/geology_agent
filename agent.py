@@ -22,7 +22,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_openai import ChatOpenAI
 
 # 4. Local applications
-from build_knowledge_base import load_vector_store
+from build_knowlege_base import load_vector_store
 
 
 # ═══════════════════════════════════════════════════════════════════════════
