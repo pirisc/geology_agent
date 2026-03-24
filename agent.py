@@ -1,20 +1,28 @@
-from typing import Annotated, TypedDict, AsyncGenerator
+### IMPORTS###
+
+# 1. Standard Library
 import logging
 import os
+from typing import Annotated, AsyncGenerator, TypedDict
 
+# 2. Third-Party Libraries
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv, find_dotenv
+from dotenv import find_dotenv, load_dotenv
+import requests
+
+# 3. LangChain & LangGraph (Alphabetical by package name)
 from langchain.tools import tool
 from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
-from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langchain_openai import ChatOpenAI
 
-import requests
+# 4. Local applications
+from build_knowledge_base import load_vector_store
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -27,6 +35,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 # ═══════════════════════════════════════════════════════════════════════════
 # SETUP & CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════
@@ -37,136 +46,40 @@ MAX_INPUT_LENGTH = 10000
 WEB_SCRAPER_CHAR_LIMIT = 8000
 WEB_SCRAPER_TIMEOUT = 20
 
+# Load vector store when the server starts
+try:    
+    VECTOR_DB = load_vector_store("geology_kb")
+    logger.info("✅ Rocky has successfully connected to the Geology Knowledge Base.")
+except Exception as e:
+    VECTOR_DB = None
+    logger.error(f"❌ Rocky could not find the database: {e}")
+
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM PROMPT
 # ═══════════════════════════════════════════════════════════════════════════
 
 SYSTEM_PROMPT = """
-You are Rocky, an AI assistant specializing in Geology and Earth Sciences.
+You are Rocky, an expert AI Geologist. You bridge the gap between complex Earth Science and accessible education.
 
-You have expert-level knowledge across all geological disciplines: petrology, 
-mineralogy, sedimentology, stratigraphy, structural geology, tectonics, geophysics, 
-geomorphology, paleontology, hydrogeology, geochemistry, and applied fields like 
-engineering geology and resource exploration.
+CORE OPERATING PRINCIPLES:
+1. TOOL FIRST: For any factual geological query, use 'search_geology_knowledge_base'. If that yields no results, use 'tavily_search'.
+2. ACCURACY: Distinguish between scientific consensus and theory. Cite evidence (e.g., "seismic data suggests").
+3. VISUALS: Proactively use 'find_geological_images' when describing physical objects (rocks, minerals) or processes (subduction).
+4. SAFETY: Discuss hazards (volcanoes, quakes) educationally. Never provide DIY instructions for explosives or hazardous site entry.
 
-Your purpose is to make geological science accessible, accurate, and engaging—
-whether explaining plate tectonics to a curious student or discussing stable 
-isotope geochemistry with a researcher.
+RESPONSE STRUCTURE:
+- Simple Questions: Conversational prose. Define technical terms in-line.
+- Complex Topics: Use markdown headers (##) and bullet points for scannability.
+- Synthesis: Do not just dump tool outputs. Summarize the findings from the knowledge base into a cohesive narrative.
 
---------------------
-FORMATTING GUIDELINES
---------------------
-Adapt your response style to the question's complexity and the user's needs:
+ENGAGEMENT:
+Always end with 1-2 natural follow-up questions to spark curiosity. 
+Example: "Would you like to know how this formation looks in a different tectonic setting?"
 
-- For simple questions: Provide direct, conversational answers in natural prose.
-- For complex topics: Use clear paragraphs with structure when it aids understanding.
-- Use lists/bullets when comparing multiple items, listing steps, or when requested.
-- Define technical terms naturally within your explanation.
-- Lead with the most important information.
-- Avoid over-formatting (excessive bold, headers, or lists) in typical explanations.
-
------------------------
-PROVIDING IMAGE RESOURCES
------------------------
-You have a tool called 'find_geological_images' that provides links to trusted geology image sources:
-
-**How to use it:**
-- Use it when visual examples would help (rocks, minerals, diagrams, processes)
-- Be specific in your description: "basalt thin section" not just "rock"
-- The tool automatically picks the best resource (Mindat for minerals, USGS for diagrams, etc.)
-
-**Example usage:**
-- User asks about granite → explain, then mention: "Let me point you to some images of granite"
-- User asks about plate boundaries → explain, then: "I can show you where to find diagrams of this"
-
-**What it provides:**
-- Direct links to professional geology databases
-- High-quality, scientifically accurate images
-- Resources maintained by geologists and institutions
-
------------------------
-SCIENTIFIC APPROACH
------------------------
-- Base answers on established scientific consensus and evidence.
-- Distinguish clearly between established knowledge, leading theories, and speculation.
-- When discussing evolving topics, present multiple perspectives from the literature.
-- Cite the type of evidence supporting claims (e.g., "radiometric dating shows...", 
-  "seismic data indicates...", "field observations suggest...").
-- If information is uncertain or outside your knowledge, say so explicitly.
-- For ambiguous questions, state your assumptions or ask for clarification.
-- If 'tavily_search' is used, ALWAYS cite sources with author/publication when available.
-- Prefer peer-reviewed sources and official geological surveys.
-
--------------------------------
-PROACTIVE ENGAGEMENT & QUESTIONS
--------------------------------
-After answering the user's question, enrich the conversation by:
-
-- Asking 1-2 relevant follow-up questions that deepen understanding of the topic.
-- Connecting to related geological concepts they might find interesting.
-- Exploring the "why" or "how" behind the phenomena discussed.
-- Inquiring about their specific context (e.g., location, academic level, project goals) 
-  when it would help tailor future responses.
-- Suggesting related topics worth exploring based on their interests.
-
-Examples of good follow-up questions:
-- "Are you interested in how this process varies in different tectonic settings?"
-- "Would you like to know how geologists actually measure this in the field?"
-- "Is this for a specific region or project you're working on?"
-- "Have you encountered [related concept] before? It's closely connected to this."
-- "What sparked your interest in this particular aspect of geology?"
-
-**STUDY MODE**: When users want to test their knowledge:
-1. Generate 2-3 questions based on the discussed topic
-2. Wait for their answers
-3. Provide constructive feedback on each answer
-4. Explain correct answers with context
-5. Ask if they want more questions or to move to a new topic
-
-Keep follow-ups natural and conversational—limit to 1-2 questions per response 
-to avoid overwhelming the user.
-
-----------------
-SAFETY GUIDELINES
-----------------
-When discussing topics with safety implications:
-
-- Provide scientific explanations of hazards and processes freely.
-- Explain risk assessment principles and general mitigation strategies.
-- Do NOT provide operational instructions for:
-  * Explosive handling or manufacturing
-  * Unsupervised drilling/excavation operations
-  * Entering hazardous environments (active volcanoes, unstable mines)
-  * Professional fieldwork requiring specialized safety training
-
-- For hazard preparedness: Offer general awareness and direct users to 
-  official emergency management resources.
-- State when professional expertise (licensed geologist, engineer) is required.
-- Educational discussions of hazardous topics for learning purposes are appropriate.
-
---------------------------
-PRACTICAL APPLICATIONS
---------------------------
-When users ask about applied geology:
-
-- Provide educational explanations of methods and principles.
-- Explain what professionals consider in real scenarios.
-- Clarify when questions require site-specific data, professional analysis, 
-  or regulatory compliance.
-- Distinguish between educational explanation and actionable consulting advice.
-
-----------------------
-INTERACTION STYLE
-----------------------
-- Gauge the user's expertise from their question and adjust accordingly.
-- For ambiguous questions, make reasonable assumptions but state them.
-- Use analogies and real-world examples to make abstract concepts concrete.
-- Be enthusiastic—geology is fascinating!
-- If a question falls outside geology, briefly acknowledge and optionally redirect.
-
-Your primary goal is to help users understand Earth science deeply, accurately, 
-and safely—while fostering curiosity through thoughtful questions.
+STUDY MODE:
+If a user wants to test knowledge, use 'start_quiz_mode' to structure the interaction.
 """
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # TOOLS
@@ -181,6 +94,7 @@ tavily_search = TavilySearchResults(
 )
 
 
+# Tool 2: Web Scrapper 
 @tool
 def web_scraper_tool(url: str) -> str:
     """Scrape a webpage and return cleaned text content."""
@@ -236,6 +150,7 @@ def web_scraper_tool(url: str) -> str:
         return f"Unexpected error processing {url}: {str(exc)}"
 
 
+# Tool 3: Find geological images from Google images
 @tool
 def find_geological_images(topic: str) -> str:
     """
@@ -299,6 +214,7 @@ def find_geological_images(topic: str) -> str:
     )
 
 
+# Tool 4: Quiz mode
 @tool
 def start_quiz_mode(topic: str, difficulty: str = "intermediate", num_questions: int = 3) -> str:
     """
@@ -335,13 +251,85 @@ def start_quiz_mode(topic: str, difficulty: str = "intermediate", num_questions:
     )
 
 
+# Tool 5: Search geology knowledge
+@tool
+def search_geology_knowledge_base(query: str)->str:
+    """Search Rocky's geology knowledge base for relevant information.
+        Sources: geological associations and other public domain geological resources 
+        Args:
+            query: what the user want to search
+        
+        Returns:
+            relevant information with source citations about the user's query
+    """
+    if VECTOR_DB is None:
+        return "⚠️ Error: The internal knowledge base is not currently loaded."
+
+    try:
+        #Search for relevant chunks
+        results = VECTOR_DB.similarity_search(query, k = 3)
+
+        # Format results
+        if not results:
+            return "🔍 I searched the internal records but couldn't find a direct match for that query."
+        
+        formatted_results = "🔍 **Relevant information found it in Rocky's knowledge base:**\n\n"
+        for i, result in enumerate(results, 1):
+            source_page = result.metadata.get("page", "N/A")
+            source_title = result.metadata.get("title", "Geological document")
+            
+            formatted_results += f"**Source {i}** found it in {source_title}, page {source_page}:\n"
+            formatted_results += f"{result.page_content}\n\n"
+            formatted_results += "---\n"
+        
+        return formatted_results
+        
+    
+    except Exception as e:
+        return f"❌ Error searching knowledge database: {str(e)}"
+
+
+# Tool 6: Get recent information about earthquakes
+@tool
+def get_earthquake_data(location: str = "worldwide", magnitude_min: float = 4.5)-> str:
+    """Get recent eathquakes data from USGS.
+        Args:
+            location: location where the user want to search
+            magnitude_min: the minimum magnitude for the earthquakes to appear in the search
+        
+        Return:
+            recent earthquake information from USGS.
+    """
+
+    try:
+        if location.lower() == "worldwide":
+            query = f"search for recent earthquakes with magnitude {magnitude_min} or greater in the USGS"
+        else:
+            query = f"search for recent earthquakes in {location} with magnitude {magnitude_min} or greater in the USGS"
+        
+        results = tavily_search.invoke({"query":query})
+
+        #Format results for easy reading
+        formatted = f"**Recent earthquakes** (Magnitude >= {magnitude_min}):\n\n"
+        formatted += str(results)
+        formatted += "\n\n*Data from USGS"
+
+        return formatted
+    
+    except Exception as e:
+        return f"Unable to fetch earthquake data: {str(e)}"
+
+
 # Register all tools
 tools = [
     tavily_search,
     web_scraper_tool,
     find_geological_images,
     start_quiz_mode,
+    search_geology_knowledge_base,
+    get_earthquake_data
 ]
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LANGGRAPH SETUP
@@ -391,13 +379,33 @@ llm = ChatOpenAI(
 
 
 def chatbot(state: State):
-    """Main chatbot node."""
+    """Main chatbot node.
+        Injects the SYSTEM_PROMPT into every turn to ensure the persona doesn't drift.
+        It also handles potential API/Network error
+    """
+
     try:
-        response = llm.invoke(state["messages"])
+        messages = state["messages"]
+
+        # Ensure the system prompt is always at the top
+        # check the first message to avoid duplicatin it
+        if not messages or not (isinstance(messages[0], tuple) and messages[0][0] == "system"):
+            messages = [("system", SYSTEM_PROMPT)] + messages
+        
+        # call the llm
+        response = llm.invoke(messages)
         return {"messages": [response]}
-    except Exception as exc:
-        logger.error("Error in chatbot node: %s", str(exc), exc_info=True)
-        raise RuntimeError(f"Error processing your request: {str(exc)}") from exc
+    
+    except Exception as e:
+        logger.error(f"Chatbot Node Error: {str(e)}")
+
+        # Return friendly message to user
+        error_message = (
+            "🪨 **Rocky here!** I've encountered a bit of a landslide in my circuits. "
+            "My connection to the geological database was briefly interrupted. "
+            "Could you please try your question again?"
+        )
+        return {"messages": [("assistant", error_message)]}
 
 
 graph_builder.add_node("chatbot", chatbot)
@@ -429,22 +437,20 @@ def validate_input(user_input: str) -> tuple[bool, str]:
 
 
 async def run_agent(user_input: str, thread_id: str) -> AsyncGenerator[str, None]:
-    """Stream generated tokens for the geology chatbot."""
+    """Stream ONLY the refined LLM output for a cleaner UI."""
     is_valid, error_msg = validate_input(user_input)
     if not is_valid:
-        logger.warning("Invalid input: %s", error_msg)
         yield error_msg
         return
 
     try:
         config = {"configurable": {"thread_id": thread_id}}
+        
+        # Determine if we need to send the system prompt
         state = graph.get_state(config)
-        is_new_conversation = not state.values.get("messages")
-
-        if is_new_conversation:
-            messages = [("system", SYSTEM_PROMPT), ("user", user_input)]
-        else:
-            messages = [("user", user_input)]
+        messages = [("user", user_input)]
+        if not state.values.get("messages"):
+            messages.insert(0, ("system", SYSTEM_PROMPT))
 
         async for event in graph.astream_events(
             {"messages": messages},
@@ -453,30 +459,13 @@ async def run_agent(user_input: str, thread_id: str) -> AsyncGenerator[str, None
         ):
             kind = event.get("event")
 
-            # Stream LLM text output
+            # ONLY yield the final chat model stream
+            # This avoids showing the "raw" tool output to the user
             if kind == "on_chat_model_stream":
                 content = event["data"]["chunk"].content
                 if content:
                     yield content
-            
-            # Handle tool outputs (especially images)
-            elif kind == "on_tool_end":
-                tool_name = event.get("name", "")
-                if tool_name == "find_geological_images":
-                    # Get the tool output
-                    output = event["data"].get("output")
-                    if hasattr(output, "content"):
-                        output = output.content
-                    output = str(output).strip()
-                    
-                    # Stream the tool output (which includes image markdown or links)
-                    if output:
-                        yield f"\n\n{output}\n\n"
 
     except Exception as exc:
-        error_message = (
-            f"\n\n❌ An error occurred: {str(exc)}\n\n"
-            "Please try rephrasing your question or start a new chat."
-        )
-        logger.error("Error in run_agent for thread %s: %s", thread_id, str(exc), exc_info=True)
-        yield error_message
+        logger.error(f"Error in run_agent: {exc}")
+        yield f"\n\n❌ Error: {str(exc)}"
