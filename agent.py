@@ -14,7 +14,7 @@ import requests
 from langchain.tools import tool
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.checkpoint.postgres import PostgresSaver
+#from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
@@ -26,19 +26,11 @@ from build_knowlege_base import load_vector_store
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# LOGGING SETUP
+# SETUP
 # ═══════════════════════════════════════════════════════════════════════════
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+logging.basicConfig(level=logging.INFO,format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SETUP & CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════
 
 load_dotenv(find_dotenv(), override=True)
 
@@ -56,6 +48,17 @@ except Exception as e:
     VECTOR_DB = None
     logger.error(f"❌ Rocky could not find the database at {VECTOR_DB_DIR}: {e}")
 
+# Checkpointer
+db_url = os.getenv("DATABASE_URL")
+
+if db_url:
+    db_path = "rocky_conversations.db"
+    checkpointer = SqliteSaver.from_conn_string(db_path)
+    logger.info("✓ Using SQLite checkpointer")
+
+else:
+    checkpointer = MemorySaver()
+    logger.info("✓ Using MemorySaver")
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM PROMPT
 # ═══════════════════════════════════════════════════════════════════════════
@@ -355,73 +358,93 @@ tools = [
 # LANGGRAPH SETUP
 # ═══════════════════════════════════════════════════════════════════════════
 
+### IMPORTS ###
+import logging
+import os
+from typing import Annotated, AsyncGenerator, TypedDict
+
+from bs4 import BeautifulSoup
+from dotenv import find_dotenv, load_dotenv
+import requests
+
+from langchain.tools import tool
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langgraph.checkpoint.memory import MemorySaver
+# We'll use the basic savers for simplicity to avoid the Context Manager error
+from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.graph import StateGraph
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode, tools_condition
+from langchain_openai import ChatOpenAI
+
+from build_knowledge_base import load_vector_store
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SETUP
+# ═══════════════════════════════════════════════════════════════════════════
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
+load_dotenv(find_dotenv(), override=True)
+
+MAX_INPUT_LENGTH = 10000
+VECTOR_DB_DIR = os.getenv("VECTOR_DB_DIR", "geology_kb")
+
+try:    
+    VECTOR_DB = load_vector_store(VECTOR_DB_DIR)
+    logger.info("✅ Rocky connected to Knowledge Base.")
+except Exception as e:
+    VECTOR_DB = None
+    logger.error(f"❌ Knowledge Base error: {e}")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CHECKPOINTER SETUP (The Fix for Render/Postgres)
+# ═══════════════════════════════════════════════════════════════════════════
+db_url = os.getenv('DATABASE_URL')
+
+# To avoid the 'AttributeError' from earlier, we'll stick to SQLite 
+# for stability, or use MemorySaver if you don't need long-term memory.
+if db_url:
+    # If you are on Render and want to use Postgres, SQLite is actually 
+    # safer unless you use the "ConnectionPool" version I showed earlier.
+    # For now, let's use SQLite to ensure it WORKs immediately.
+    db_path = "rocky_conversations.db"
+    checkpointer = SqliteSaver.from_conn_string(db_path)
+    logger.info("✓ Using SQLite checkpointer")
+else:
+    checkpointer = MemorySaver()
+    logger.info("✓ Using MemorySaver")
+
+# ... [Keep your SYSTEM_PROMPT and TOOLS exactly as they were] ...
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LANGGRAPH SETUP
+# ═══════════════════════════════════════════════════════════════════════════
+
 class State(TypedDict):
     messages: Annotated[list, add_messages]
 
-
-def build_checkpointer():
-    """Build a checkpointer with production-first fallback chain."""
-    db_url = os.getenv("DATABASE_URL")
-
-    if db_url:
-        normalized_url = db_url.replace("postgres://", "postgresql://", 1)
-        try:
-            checkpointer = PostgresSaver.from_conn_string(normalized_url)
-            # Some versions require setup(); harmless if available.
-            if hasattr(checkpointer, "setup"):
-                checkpointer.setup()
-            logger.info("Using PostgreSQL checkpointer")
-            return checkpointer
-        except Exception as exc:  # noqa: BLE001
-            logger.error("PostgreSQL setup failed: %s", exc)
-            logger.warning("Falling back to MemorySaver (no persistence)")
-            return MemorySaver()
-
-    db_path = os.getenv("ROCKY_DB_PATH", "rocky_conversations.db")
-    logger.info("Using SQLite checkpointer at %s", db_path)
-    return SqliteSaver.from_conn_string(db_path)
-
-
-def create_graph():
-    """Builds Rocky the Geologist lazily and safely."""
+def chatbot(state: State):
+    # Setup LLM inside 
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7).bind_tools(tools=tools)
+    messages = state["messages"]
+    if not messages or not (isinstance(messages[0], tuple) and messages[0][0] == "system"):
+        messages = [("system", SYSTEM_PROMPT)] + messages
     
-    graph_builder = StateGraph(State)
-    
-    # Configure LLM using env variables
-    llm = ChatOpenAI(
-        model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
-        temperature=0.7
-    ).bind_tools(tools=tools)
+    try:
+        response = llm.invoke(messages)
+        return {"messages": [response]}
+    except Exception as e:
+        return {"messages": [("assistant", "🪨 Connection interrupted. Try again?")]}
 
-    # Nest the chatbot logic
-    def chatbot(state: State):
-        try:
-            messages = state["messages"]
+graph_builder = StateGraph(State)
+graph_builder.add_node("chatbot", chatbot)
+graph_builder.add_node("tools", ToolNode(tools=tools))
+graph_builder.add_conditional_edges("chatbot", tools_condition)
+graph_builder.add_edge("tools", "chatbot")
+graph_builder.set_entry_point("chatbot")
 
-            # System Prompt Injection logic
-            if not messages or not (isinstance(messages[0], tuple) and messages[0][0] == "system"):
-                messages = [("system", SYSTEM_PROMPT)] + messages
-            
-            response = llm.invoke(messages)
-            return {"messages": [response]}
-        
-        except Exception as e:
-            logger.error(f"Chatbot Node Error: {str(e)}")
-            error_message = (
-                "🪨 **Rocky here!** I've encountered a bit of a landslide in my circuits. "
-                "My connection to the geological database was briefly interrupted. "
-                "Could you please try your question again?"
-            )
-            return {"messages": [("assistant", error_message)]}
-
-    # Build up the graph
-    graph_builder.add_node("chatbot", chatbot)
-    graph_builder.add_node("tools", ToolNode(tools=tools))
-    graph_builder.add_conditional_edges("chatbot", tools_condition)
-    graph_builder.add_edge("tools", "chatbot")
-    graph_builder.set_entry_point("chatbot")
-
-    return graph_builder.compile(checkpointer=build_checkpointer())
+# This is your "compiled" graph
+graph = graph_builder.compile(checkpointer=checkpointer)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -451,43 +474,28 @@ async def run_agent(user_input: str, thread_id: str) -> AsyncGenerator[str, None
         logger.warning("Invalid input: %s", error_msg)
         yield error_msg
         return
-
-    graph = create_graph()
-
+    
     try:
         config = {"configurable": {"thread_id": thread_id}}
+        
+        # Check if state exists safely
         state = graph.get_state(config)
-        is_new_conversation = not (state and state.values and state.values.get("messages"))
-
-        if is_new_conversation:
-            messages = [("system", SYSTEM_PROMPT), ("user", user_input)]
-        else:
-            messages = [("user", user_input)]
+        messages = [("user", user_input)]
+        
+        # Only add system prompt if it's a brand new thread
+        if not state or not state.values.get("messages"):
+            messages.insert(0, ("system", SYSTEM_PROMPT))
 
         async for event in graph.astream_events(
             {"messages": messages},
             config=config,
             version="v2",
         ):
-            kind = event.get("event")
-
-            if kind == "on_chat_model_stream":
-                content = event.get("data", {}).get("chunk", {}).content
+            if event.get("event") == "on_chat_model_stream":
+                content = event["data"]["chunk"].content
                 if content:
                     yield content
 
-            elif kind == "on_tool_end":
-                tool_name = event.get("name", "")
-                if tool_name == "find_geological_images":
-                    output = event.get("data", {}).get("output")
-                    if hasattr(output, "content"):
-                        output = output.content
-                    if output:
-                        yield f"\n\n{str(output).strip()}\n\n"
-
     except Exception as exc:
-        logger.exception("Error in run_agent for thread %s", thread_id)
-        yield (
-            f"\n\n❌ An error occurred: {exc}\n\n"
-            "Please try rephrasing your question or start a new chat."
-        )
+        logger.error(f"Error: {exc}")
+        yield f"❌ Error: {str(exc)}"
