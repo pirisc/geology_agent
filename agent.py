@@ -59,6 +59,8 @@ if db_url:
 else:
     checkpointer = MemorySaver()
     logger.info("✓ Using MemorySaver")
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM PROMPT
 # ═══════════════════════════════════════════════════════════════════════════
@@ -353,68 +355,6 @@ tools = [
     get_earthquake_data
 ]
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# LANGGRAPH SETUP
-# ═══════════════════════════════════════════════════════════════════════════
-
-### IMPORTS ###
-import logging
-import os
-from typing import Annotated, AsyncGenerator, TypedDict
-
-from bs4 import BeautifulSoup
-from dotenv import find_dotenv, load_dotenv
-import requests
-
-from langchain.tools import tool
-from langchain_community.tools.tavily_search import TavilySearchResults
-from langgraph.checkpoint.memory import MemorySaver
-# We'll use the basic savers for simplicity to avoid the Context Manager error
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.graph import StateGraph
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode, tools_condition
-from langchain_openai import ChatOpenAI
-
-from build_knowledge_base import load_vector_store
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SETUP
-# ═══════════════════════════════════════════════════════════════════════════
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
-load_dotenv(find_dotenv(), override=True)
-
-MAX_INPUT_LENGTH = 10000
-VECTOR_DB_DIR = os.getenv("VECTOR_DB_DIR", "geology_kb")
-
-try:    
-    VECTOR_DB = load_vector_store(VECTOR_DB_DIR)
-    logger.info("✅ Rocky connected to Knowledge Base.")
-except Exception as e:
-    VECTOR_DB = None
-    logger.error(f"❌ Knowledge Base error: {e}")
-
-# ═══════════════════════════════════════════════════════════════════════════
-# CHECKPOINTER SETUP (The Fix for Render/Postgres)
-# ═══════════════════════════════════════════════════════════════════════════
-db_url = os.getenv('DATABASE_URL')
-
-# To avoid the 'AttributeError' from earlier, we'll stick to SQLite 
-# for stability, or use MemorySaver if you don't need long-term memory.
-if db_url:
-    # If you are on Render and want to use Postgres, SQLite is actually 
-    # safer unless you use the "ConnectionPool" version I showed earlier.
-    # For now, let's use SQLite to ensure it WORKs immediately.
-    db_path = "rocky_conversations.db"
-    checkpointer = SqliteSaver.from_conn_string(db_path)
-    logger.info("✓ Using SQLite checkpointer")
-else:
-    checkpointer = MemorySaver()
-    logger.info("✓ Using MemorySaver")
-
-# ... [Keep your SYSTEM_PROMPT and TOOLS exactly as they were] ...
 
 # ═══════════════════════════════════════════════════════════════════════════
 # LANGGRAPH SETUP
