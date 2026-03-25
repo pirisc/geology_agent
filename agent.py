@@ -14,8 +14,8 @@ import requests
 from langchain.tools import tool
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langgraph.checkpoint.memory import MemorySaver
-#from langgraph.checkpoint.postgres import PostgresSaver
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.postgres import PostgresSaver
+#from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -38,7 +38,7 @@ load_dotenv(find_dotenv(), override=True)
 MAX_INPUT_LENGTH = int(os.getenv("MAX_INPUT_LENGTH", 1000))
 WEB_SCRAPER_CHAR_LIMIT = int(os.getenv("WEB_SCRAPER_CHAR_LIMIT", 8000))
 WEB_SCRAPER_TIMEOUT = int(os.getenv("WEB_SCRAPER_TIMEOUT", 20))
-VECTOR_DB_DIR = os.getenv("VECTOR_DB_DIR", "/geology_kb")
+VECTOR_DB_DIR = os.getenv("VECTOR_DB_DIR", "geology_kb")
 
 # Load vector store when the server starts
 try:    
@@ -47,18 +47,6 @@ try:
 except Exception as e:
     VECTOR_DB = None
     logger.error(f"❌ Rocky could not find the database at {VECTOR_DB_DIR}: {e}")
-
-# Checkpointer
-db_url = os.getenv("DATABASE_URL")
-
-if db_url:
-    db_path = "rocky_conversations.db"
-    checkpointer = SqliteSaver.from_conn_string(db_path)
-    logger.info("✓ Using SQLite checkpointer")
-
-else:
-    checkpointer = MemorySaver()
-    logger.info("✓ Using MemorySaver")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -383,8 +371,27 @@ graph_builder.add_conditional_edges("chatbot", tools_condition)
 graph_builder.add_edge("tools", "chatbot")
 graph_builder.set_entry_point("chatbot")
 
-# This is your "compiled" graph
-graph = graph_builder.compile(checkpointer=checkpointer)
+# Set up the checkpinter
+db_url = os.getenv('DATABASE_URL')
+
+if db_url:
+    # Clean the URL
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
+    
+    try:
+        with PostgresSaver.from_conn_string(db_url) as saver:
+            saver.setup()
+            # Compile the graph
+            graph = graph_builder.compile(checkpointer=saver)
+            logger.info("✅ Rocky is connected to your Render Postgres Database!")
+            
+    except Exception as e:
+        logger.error(f"Postgres failed: {e}. Falling back to Memory.")
+        graph = graph_builder.compile(checkpointer=MemorySaver())
+else:
+    # Local fallback
+    graph = graph_builder.compile(checkpointer=MemorySaver())
 
 
 # ═══════════════════════════════════════════════════════════════════════════
