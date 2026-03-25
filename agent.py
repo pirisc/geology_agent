@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 from dotenv import find_dotenv, load_dotenv
 import requests
 
-# 3. LangChain & LangGraph (Alphabetical by package name)
+# 3. LangChain & LangGraph
 from langchain.tools import tool
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langgraph.checkpoint.memory import MemorySaver
@@ -42,17 +42,19 @@ logger = logging.getLogger(__name__)
 
 load_dotenv(find_dotenv(), override=True)
 
-MAX_INPUT_LENGTH = 10000
-WEB_SCRAPER_CHAR_LIMIT = 8000
-WEB_SCRAPER_TIMEOUT = 20
+# This way is to allow change settings from the .env file (faster)
+MAX_INPUT_LENGTH = int(os.getenv("MAX_INPUT_LENGTH", 1000))
+WEB_SCRAPER_CHAR_LIMIT = int(os.getenv("WEB_SCRAPER_CHAR_LIMIT", 8000))
+WEB_SCRAPER_TIMEOUT = int(os.getenv("WEB_SCRAPER_TIMEOUT", 20))
+VECTOR_DB_DIR = os.getenv("VECTOR_DB_DIR", "/geology_kb")
 
 # Load vector store when the server starts
 try:    
-    VECTOR_DB = load_vector_store("geology_kb")
-    logger.info("✅ Rocky has successfully connected to the Geology Knowledge Base.")
+    VECTOR_DB = load_vector_store(VECTOR_DB_DIR)
+    logger.info(f"✅ Rocky has successfully connected to the Geology Knowledge Base at: {VECTOR_DB_DIR}")
 except Exception as e:
     VECTOR_DB = None
-    logger.error(f"❌ Rocky could not find the database: {e}")
+    logger.error(f"❌ Rocky could not find the database at {VECTOR_DB_DIR}: {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SYSTEM PROMPT
@@ -162,6 +164,9 @@ def find_geological_images(topic: str) -> str:
     Returns:
         Markdown-formatted image or fallback link
     """
+    if not topic.strip():
+        return "Please provide a valid geology topic"
+    
     topic_lower = topic.lower()
     
     # Build a targeted search query
@@ -229,25 +234,20 @@ def start_quiz_mode(topic: str, difficulty: str = "intermediate", num_questions:
         Instructions for generating quiz questions
     """
     # Validate inputs
-    if num_questions < 1:
-        num_questions = 1
-    elif num_questions > 5:
-        num_questions = 5
-    
-    difficulty = difficulty.lower()
-    if difficulty not in ["easy", "intermediate", "advanced"]:
+    num_questions = max(1, min(5, int(num_questions)))
+    difficulty = (difficulty or "intermediate").lower()
+    if difficulty not in {"easy", "intermediate", "advanced"}:
         difficulty = "intermediate"
     
     return (
-        f"🎯 QUIZ MODE ACTIVATED\n\n"
+        "🎯 QUIZ MODE ACTIVATED\n\n"
         f"Generate {num_questions} {difficulty}-level multiple-choice questions about '{topic}'.\n\n"
-        f"Format:\n"
-        f"- Number each question clearly\n"
-        f"- Provide 4 options (A, B, C, D) for each\n"
-        f"- Make questions test understanding, not just memorization\n"
-        f"- After presenting all questions, WAIT for the user to answer\n"
-        f"- Then provide feedback and explanations for each answer\n\n"
-        f"End with: 'Take your time! Reply with your answers (e.g., 1-A, 2-C, 3-B) when ready.'"
+        "Format:\n"
+        "- Provide 4 options (A, B, C, D) for each  question\n"
+        "- Make questions test understanding, not just memorization\n"
+        "- After presenting all questions, WAIT for the user to answer\n"
+        "- Then provide feedback and explanations for each answer\n\n"
+        "End with: 'Take your time! Reply with your answers (e.g., 1-A, 2-C, 3-B) when ready.'"
     )
 
 
@@ -267,7 +267,7 @@ def search_geology_knowledge_base(query: str)->str:
 
     try:
         #Search for relevant chunks
-        results = VECTOR_DB.similarity_search(query, k = 3)
+        results = VECTOR_DB.similarity_search_with_relevance_scores(query, k = 3)
 
         # Format results
         if not results:
@@ -292,7 +292,7 @@ def search_geology_knowledge_base(query: str)->str:
 # Tool 6: Get recent information about earthquakes
 @tool
 def get_earthquake_data(location: str = "worldwide", magnitude_min: float = 4.5)-> str:
-    """Get recent eathquakes data from USGS.
+    """Get recent eathquakes data from USGS GeoJSON feed.
         Args:
             location: location where the user want to search
             magnitude_min: the minimum magnitude for the earthquakes to appear in the search
@@ -302,22 +302,42 @@ def get_earthquake_data(location: str = "worldwide", magnitude_min: float = 4.5)
     """
 
     try:
-        if location.lower() == "worldwide":
-            query = f"search for recent earthquakes with magnitude {magnitude_min} or greater in the USGS"
-        else:
-            query = f"search for recent earthquakes in {location} with magnitude {magnitude_min} or greater in the USGS"
-        
-        results = tavily_search.invoke({"query":query})
+        minmag = max(0.0, float(magnitude_min))
+        feed_url = (
+            "https://earthquake.usgs.gov/fdsnws/event/1/query"
+            "?format=geojson&orderby=time&limit=10"
+            f"&minmagnitude={minmag}"
+        )
 
-        #Format results for easy reading
-        formatted = f"**Recent earthquakes** (Magnitude >= {magnitude_min}):\n\n"
-        formatted += str(results)
-        formatted += "\n\n*Data from USGS"
+        data = requests.get(feed_url, timeout=15).json()
+        features = data.get("features", [])
+        if not features:
+            return f"No recent earthquakes found with magnitude >= {minmag}."
 
-        return formatted
-    
-    except Exception as e:
-        return f"Unable to fetch earthquake data: {str(e)}"
+        lines = [f"Recent earthquakes (USGS, magnitude >= {minmag}):"]
+        location_filter = location.strip().lower()
+
+        for item in features:
+            props = item.get("properties", {})
+            place = props.get("place", "Unknown location")
+            mag = props.get("mag", "?")
+            ts_ms = props.get("time")
+            usgs_url = props.get("url", "")
+
+            if location_filter != "worldwide" and location_filter not in place.lower():
+                continue
+
+            lines.append(f"- M{mag} | {place} | {ts_ms} | {usgs_url}")
+
+        if len(lines) == 1:
+            return f"No recent events matched location='{location}'."
+
+        lines.append("Source: USGS Earthquake Hazards Program")
+        return "\n".join(lines)
+
+    except Exception as exc: 
+        logger.exception("USGS lookup failed")
+        return f"Unable to fetch earthquake data: {exc}"
 
 
 # Register all tools
@@ -335,85 +355,73 @@ tools = [
 # LANGGRAPH SETUP
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Get the database url
-db_url = os.getenv('DATABASE_URL')
-
-if db_url:
-    # Production: Use Render's PostgreSQL
-    if db_url.startswith("postgres://"):
-        db_url = db_url.replace("postgres://", "postgresql://", 1)
-    
-    try:
-        # Create the checkpointer
-        checkpointer = PostgresSaver.from_conn_string(db_url)
-        
-        # Setup the database tables
-        checkpointer.setup()
-        
-        logger.info('✓ Using PostgreSQL checkpointer')
-    except Exception as e:
-        logger.error(f"PostgreSQL setup failed: {e}")
-        # Fallback to memory saver
-        checkpointer = MemorySaver()
-        logger.warning("⚠️ Falling back to MemorySaver (no persistence)")
-
-else:
-    # Local development: Use SQLite
-    db_path = os.getenv("ROCKY_DB_PATH", "rocky_conversations.db")
-    checkpointer = SqliteSaver.from_conn_string(db_path)
-    logger.info("✓ Using SQLite checkpointer (local only)")
-
 class State(TypedDict):
     messages: Annotated[list, add_messages]
 
 
-graph_builder = StateGraph(State)
+def build_checkpointer():
+    """Build a checkpointer with production-first fallback chain."""
+    db_url = os.getenv("DATABASE_URL")
 
-llm = ChatOpenAI(
-    model="gpt-4o-mini",
-    temperature=0.7,
-    presence_penalty=0.6,
-    frequency_penalty=0.5,
-    top_p=0.9,
-).bind_tools(tools=tools)
+    if db_url:
+        normalized_url = db_url.replace("postgres://", "postgresql://", 1)
+        try:
+            checkpointer = PostgresSaver.from_conn_string(normalized_url)
+            # Some versions require setup(); harmless if available.
+            if hasattr(checkpointer, "setup"):
+                checkpointer.setup()
+            logger.info("Using PostgreSQL checkpointer")
+            return checkpointer
+        except Exception as exc:  # noqa: BLE001
+            logger.error("PostgreSQL setup failed: %s", exc)
+            logger.warning("Falling back to MemorySaver (no persistence)")
+            return MemorySaver()
+
+    db_path = os.getenv("ROCKY_DB_PATH", "rocky_conversations.db")
+    logger.info("Using SQLite checkpointer at %s", db_path)
+    return SqliteSaver.from_conn_string(db_path)
 
 
-def chatbot(state: State):
-    """Main chatbot node.
-        Injects the SYSTEM_PROMPT into every turn to ensure the persona doesn't drift.
-        It also handles potential API/Network error
-    """
-
-    try:
-        messages = state["messages"]
-
-        # Ensure the system prompt is always at the top
-        # check the first message to avoid duplicatin it
-        if not messages or not (isinstance(messages[0], tuple) and messages[0][0] == "system"):
-            messages = [("system", SYSTEM_PROMPT)] + messages
-        
-        # call the llm
-        response = llm.invoke(messages)
-        return {"messages": [response]}
+def create_graph():
+    """Builds Rocky the Geologist lazily and safely."""
     
-    except Exception as e:
-        logger.error(f"Chatbot Node Error: {str(e)}")
+    graph_builder = StateGraph(State)
+    
+    # Configure LLM using env variables
+    llm = ChatOpenAI(
+        model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini"),
+        temperature=0.7
+    ).bind_tools(tools=tools)
 
-        # Return friendly message to user
-        error_message = (
-            "🪨 **Rocky here!** I've encountered a bit of a landslide in my circuits. "
-            "My connection to the geological database was briefly interrupted. "
-            "Could you please try your question again?"
-        )
-        return {"messages": [("assistant", error_message)]}
+    # Nest the chatbot logic
+    def chatbot(state: State):
+        try:
+            messages = state["messages"]
 
+            # System Prompt Injection logic
+            if not messages or not (isinstance(messages[0], tuple) and messages[0][0] == "system"):
+                messages = [("system", SYSTEM_PROMPT)] + messages
+            
+            response = llm.invoke(messages)
+            return {"messages": [response]}
+        
+        except Exception as e:
+            logger.error(f"Chatbot Node Error: {str(e)}")
+            error_message = (
+                "🪨 **Rocky here!** I've encountered a bit of a landslide in my circuits. "
+                "My connection to the geological database was briefly interrupted. "
+                "Could you please try your question again?"
+            )
+            return {"messages": [("assistant", error_message)]}
 
-graph_builder.add_node("chatbot", chatbot)
-graph_builder.add_node("tools", ToolNode(tools=tools))
-graph_builder.add_conditional_edges("chatbot", tools_condition)
-graph_builder.add_edge("tools", "chatbot")
-graph_builder.set_entry_point("chatbot")
-graph = graph_builder.compile(checkpointer = checkpointer)
+    # Build up the graph
+    graph_builder.add_node("chatbot", chatbot)
+    graph_builder.add_node("tools", ToolNode(tools=tools))
+    graph_builder.add_conditional_edges("chatbot", tools_condition)
+    graph_builder.add_edge("tools", "chatbot")
+    graph_builder.set_entry_point("chatbot")
+
+    return graph_builder.compile(checkpointer=build_checkpointer())
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -437,20 +445,24 @@ def validate_input(user_input: str) -> tuple[bool, str]:
 
 
 async def run_agent(user_input: str, thread_id: str) -> AsyncGenerator[str, None]:
-    """Stream ONLY the refined LLM output for a cleaner UI."""
+    """Stream generated tokens for the geology chatbot."""
     is_valid, error_msg = validate_input(user_input)
     if not is_valid:
+        logger.warning("Invalid input: %s", error_msg)
         yield error_msg
         return
 
+    graph = create_graph()
+
     try:
         config = {"configurable": {"thread_id": thread_id}}
-        
-        # Determine if we need to send the system prompt
         state = graph.get_state(config)
-        messages = [("user", user_input)]
-        if not state.values.get("messages"):
-            messages.insert(0, ("system", SYSTEM_PROMPT))
+        is_new_conversation = not (state and state.values and state.values.get("messages"))
+
+        if is_new_conversation:
+            messages = [("system", SYSTEM_PROMPT), ("user", user_input)]
+        else:
+            messages = [("user", user_input)]
 
         async for event in graph.astream_events(
             {"messages": messages},
@@ -459,13 +471,23 @@ async def run_agent(user_input: str, thread_id: str) -> AsyncGenerator[str, None
         ):
             kind = event.get("event")
 
-            # ONLY yield the final chat model stream
-            # This avoids showing the "raw" tool output to the user
             if kind == "on_chat_model_stream":
-                content = event["data"]["chunk"].content
+                content = event.get("data", {}).get("chunk", {}).content
                 if content:
                     yield content
 
+            elif kind == "on_tool_end":
+                tool_name = event.get("name", "")
+                if tool_name == "find_geological_images":
+                    output = event.get("data", {}).get("output")
+                    if hasattr(output, "content"):
+                        output = output.content
+                    if output:
+                        yield f"\n\n{str(output).strip()}\n\n"
+
     except Exception as exc:
-        logger.error(f"Error in run_agent: {exc}")
-        yield f"\n\n❌ Error: {str(exc)}"
+        logger.exception("Error in run_agent for thread %s", thread_id)
+        yield (
+            f"\n\n❌ An error occurred: {exc}\n\n"
+            "Please try rephrasing your question or start a new chat."
+        )
