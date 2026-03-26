@@ -15,7 +15,7 @@ from langchain.tools import tool
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.postgres import PostgresSaver
-#from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -351,47 +351,83 @@ tools = [
 class State(TypedDict):
     messages: Annotated[list, add_messages]
 
-def chatbot(state: State):
-    # Setup LLM inside 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7).bind_tools(tools=tools)
-    messages = state["messages"]
-    if not messages or not (isinstance(messages[0], tuple) and messages[0][0] == "system"):
-        messages = [("system", SYSTEM_PROMPT)] + messages
+
+# Get the database url
+db_url = os.getenv('DATABASE_URL')
+
+if db_url:
+    # Production: Use Render's PostgreSQL
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
     
     try:
-        response = llm.invoke(messages)
-        return {"messages": [response]}
+        # Create the checkpointer
+        checkpointer = PostgresSaver.from_conn_string(db_url)
+        
+        # Setup the database tables
+        checkpointer.setup()
+        
+        logger.info('✓ Using PostgreSQL checkpointer')
     except Exception as e:
-        return {"messages": [("assistant", "🪨 Connection interrupted. Try again?")]}
+        logger.error(f"PostgreSQL setup failed: {e}")
+        # Fallback to memory saver
+        checkpointer = MemorySaver()
+        logger.warning("⚠️ Falling back to MemorySaver (no persistence)")
+
+else:
+    # Local development: Use SQLite
+    db_path = os.getenv("ROCKY_DB_PATH", "rocky_conversations.db")
+    checkpointer = SqliteSaver.from_conn_string(db_path)
+    logger.info("✓ Using SQLite checkpointer (local only)")
+
 
 graph_builder = StateGraph(State)
+
+llm = ChatOpenAI(
+    model="gpt-4o-mini",
+    temperature=0.7,
+    presence_penalty=0.6,
+    frequency_penalty=0.5,
+    top_p=0.9,
+).bind_tools(tools=tools)
+
+
+def chatbot(state: State):
+    """Main chatbot node.
+        Injects the SYSTEM_PROMPT into every turn to ensure the persona doesn't drift.
+        It also handles potential API/Network error
+    """
+
+    try:
+        messages = state["messages"]
+
+        # Ensure the system prompt is always at the top
+        # check the first message to avoid duplicatin it
+        if not messages or not (isinstance(messages[0], tuple) and messages[0][0] == "system"):
+            messages = [("system", SYSTEM_PROMPT)] + messages
+        
+        # call the llm
+        response = llm.invoke(messages)
+        return {"messages": [response]}
+    
+    except Exception as e:
+        logger.error(f"Chatbot Node Error: {str(e)}")
+
+        # Return friendly message to user
+        error_message = (
+            "🪨 **Rocky here!** I've encountered a bit of a landslide in my circuits. "
+            "My connection to the geological database was briefly interrupted. "
+            "Could you please try your question again?"
+        )
+        return {"messages": [("assistant", error_message)]}
+
+
 graph_builder.add_node("chatbot", chatbot)
 graph_builder.add_node("tools", ToolNode(tools=tools))
 graph_builder.add_conditional_edges("chatbot", tools_condition)
 graph_builder.add_edge("tools", "chatbot")
 graph_builder.set_entry_point("chatbot")
-
-# Set up the checkpinter
-db_url = os.getenv('DATABASE_URL')
-
-if db_url:
-    # Clean the URL
-    if db_url.startswith("postgres://"):
-        db_url = db_url.replace("postgres://", "postgresql://", 1)
-    
-    try:
-        with PostgresSaver.from_conn_string(db_url) as saver:
-            saver.setup()
-            # Compile the graph
-            graph = graph_builder.compile(checkpointer=saver)
-            logger.info("✅ Rocky is connected to your Render Postgres Database!")
-            
-    except Exception as e:
-        logger.error(f"Postgres failed: {e}. Falling back to Memory.")
-        graph = graph_builder.compile(checkpointer=MemorySaver())
-else:
-    # Local fallback
-    graph = graph_builder.compile(checkpointer=MemorySaver())
+graph = graph_builder.compile(checkpointer = checkpointer)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -421,28 +457,48 @@ async def run_agent(user_input: str, thread_id: str) -> AsyncGenerator[str, None
         logger.warning("Invalid input: %s", error_msg)
         yield error_msg
         return
-    
+
     try:
         config = {"configurable": {"thread_id": thread_id}}
-        
-        # Check if state exists safely
         state = graph.get_state(config)
-        messages = [("user", user_input)]
-        
-        # Only add system prompt if it's a brand new thread
-        if not state or not state.values.get("messages"):
-            messages.insert(0, ("system", SYSTEM_PROMPT))
+        is_new_conversation = not state.values.get("messages")
+
+        if is_new_conversation:
+            messages = [("system", SYSTEM_PROMPT), ("user", user_input)]
+        else:
+            messages = [("user", user_input)]
 
         async for event in graph.astream_events(
             {"messages": messages},
             config=config,
             version="v2",
         ):
-            if event.get("event") == "on_chat_model_stream":
+            kind = event.get("event")
+
+            # Stream LLM text output
+            if kind == "on_chat_model_stream":
                 content = event["data"]["chunk"].content
                 if content:
                     yield content
+            
+            # Handle tool outputs (especially images)
+            elif kind == "on_tool_end":
+                tool_name = event.get("name", "")
+                if tool_name == "find_geological_images":
+                    # Get the tool output
+                    output = event["data"].get("output")
+                    if hasattr(output, "content"):
+                        output = output.content
+                    output = str(output).strip()
+                    
+                    # Stream the tool output (which includes image markdown or links)
+                    if output:
+                        yield f"\n\n{output}\n\n"
 
     except Exception as exc:
-        logger.error(f"Error: {exc}")
-        yield f"❌ Error: {str(exc)}"
+        error_message = (
+            f"\n\n❌ An error occurred: {str(exc)}\n\n"
+            "Please try rephrasing your question or start a new chat."
+        )
+        logger.error("Error in run_agent for thread %s: %s", thread_id, str(exc), exc_info=True)
+        yield error_message
