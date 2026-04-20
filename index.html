@@ -1,0 +1,1447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Rocky - Geology Assistant</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --earth-brown: #8B4513;
+      --rock-gray: #4A5568;
+      --mineral-blue: #2C5F7C;
+      --fossil-amber: #D4A574;
+      --sediment-beige: #F5F1E8;
+      --granite-dark: #2D3748;
+      --lava-red: #C53030;
+      --quartz-white: #FDFCFB;
+      --slate-blue: #3B5166;
+      --copper-accent: #B87333;
+      
+      --shadow-sm: 0 2px 4px rgba(0,0,0,0.08);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.12);
+      --shadow-lg: 0 8px 24px rgba(0,0,0,0.15);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body { 
+      font-family: 'Crimson Pro', Georgia, serif;
+      background: linear-gradient(135deg, #2D3748 0%, #4A5568 50%, #5A6578 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+      color: var(--rock-gray);
+    }
+
+    .container {
+      background: var(--quartz-white);
+      border-radius: 20px;
+      box-shadow: var(--shadow-lg), 0 0 0 1px rgba(0,0,0,0.05);
+      width: 100%;
+      max-width: 1000px;
+      height: 750px;
+      display: flex;
+      flex-direction: column;
+      overflow: visible;
+      position: relative;
+    }
+
+    /* Decorative geological pattern overlay */
+    .container::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 200px;
+      background: 
+        linear-gradient(135deg, rgba(44, 95, 124, 0.05) 0%, transparent 50%),
+        repeating-linear-gradient(45deg, transparent, transparent 10px, rgba(139, 69, 19, 0.03) 10px, rgba(139, 69, 19, 0.03) 20px);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .chat-wrapper {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+      z-index: 1;
+    }
+
+    .header {
+      background: linear-gradient(135deg, var(--slate-blue) 0%, var(--mineral-blue) 100%);
+      color: white;
+      padding: 28px 36px 24px;
+      border-bottom: 3px solid var(--copper-accent);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      position: relative;
+      z-index: 10;
+      overflow: visible;
+    }
+
+    .header-left {
+      flex: 1;
+    }
+
+    .header h1 {
+      font-size: 32px;
+      font-weight: 700;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      color: white;
+      letter-spacing: -0.5px;
+    }
+
+    .header-icon {
+      width: 42px;
+      height: 42px;
+      background: linear-gradient(135deg, var(--copper-accent) 0%, #D4A574 100%);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      box-shadow: var(--shadow-md);
+    }
+
+    .header p {
+      margin: 8px 0 0 56px;
+      font-size: 15px;
+      color: rgba(255, 255, 255, 0.9);
+      font-weight: 400;
+      font-style: italic;
+    }
+
+    .header-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      position: relative;
+      z-index: 100;
+    }
+
+    .icon-btn {
+      padding: 10px 16px;
+      background: rgba(255, 255, 255, 0.15);
+      color: white;
+      border: 1.5px solid rgba(255, 255, 255, 0.3);
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: 'Crimson Pro', serif;
+      transition: all 0.25s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      backdrop-filter: blur(10px);
+      position: relative;
+    }
+
+    .icon-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+      border-color: rgba(255, 255, 255, 0.5);
+      transform: translateY(-2px);
+    }
+
+    .icon-btn:active {
+      transform: translateY(0);
+    }
+
+    .language-selector {
+      position: relative;
+      z-index: 10000;
+    }
+
+    .lang-dropdown {
+      display: none;
+      position: fixed;
+      top: auto;
+      right: auto;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+      z-index: 99999;
+      min-width: 160px;
+      border: 2px solid var(--rock-gray);
+    }
+
+    .lang-dropdown.active {
+      display: block;
+      animation: slideDown 0.2s ease;
+    }
+
+    @keyframes slideDown {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .lang-option {
+      padding: 12px 16px;
+      color: var(--granite-dark);
+      cursor: pointer;
+      transition: background 0.2s;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .lang-option:hover {
+      background: var(--sediment-beige);
+    }
+
+    .lang-option.active {
+      background: var(--mineral-blue);
+      color: white;
+      font-weight: 600;
+    }
+
+    #chat { 
+      height: 100%;
+      padding: 32px 36px;
+      overflow-y: auto;
+      background: var(--sediment-beige);
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    #chat::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    #chat::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    #chat::-webkit-scrollbar-thumb {
+      background: var(--rock-gray);
+      border-radius: 4px;
+    }
+
+    #chat::-webkit-scrollbar-thumb:hover {
+      background: var(--granite-dark);
+    }
+
+    .message {
+      display: flex;
+      gap: 16px;
+      animation: fadeInUp 0.4s ease-out;
+      max-width: 85%;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+    }
+
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(12px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .message-avatar {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+      font-weight: 700;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .user .message-avatar {
+      background: linear-gradient(135deg, var(--copper-accent) 0%, var(--fossil-amber) 100%);
+      color: white;
+    }
+
+    .bot .message-avatar {
+      background: linear-gradient(135deg, var(--slate-blue) 0%, var(--mineral-blue) 100%);
+      color: white;
+    }
+
+    .message-content {
+      background: white;
+      padding: 14px 18px;
+      border-radius: 14px;
+      box-shadow: var(--shadow-sm);
+      line-height: 1.7;
+      word-wrap: break-word;
+      color: var(--granite-dark);
+      font-size: 16px;
+      border: 1px solid rgba(0,0,0,0.06);
+    }
+
+    .message-content .text-part {
+      white-space: pre-wrap;
+      display: inline;
+    }
+
+    .message-content strong {
+      font-weight: 700;
+      color: var(--granite-dark);
+    }
+
+    .bot .message-content strong {
+      color: var(--mineral-blue);
+    }
+
+    .user .message-content strong {
+      color: white;
+      font-weight: 700;
+    }
+
+    .message-content em {
+      font-style: italic;
+      color: var(--rock-gray);
+    }
+
+    .user .message-content em {
+      color: rgba(255, 255, 255, 0.95);
+    }
+
+    .message-content code {
+      background: var(--sediment-beige);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      color: var(--mineral-blue);
+      border: 1px solid rgba(0,0,0,0.1);
+    }
+
+    .user .message-content code {
+      background: rgba(255, 255, 255, 0.2);
+      color: white;
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .message-content a {
+      color: var(--mineral-blue);
+      text-decoration: underline;
+      font-weight: 600;
+    }
+
+    .message-content a:hover {
+      color: var(--slate-blue);
+    }
+
+    .user .message-content a {
+      color: white;
+      text-decoration: underline;
+    }
+
+    .message-content img {
+      max-width: 100%;
+      border-radius: 12px;
+      margin: 12px 0;
+      display: block;
+      cursor: pointer;
+      transition: transform 0.3s ease;
+      box-shadow: var(--shadow-md);
+    }
+
+    .message-content img:hover {
+      transform: scale(1.02);
+    }
+
+    .user .message-content {
+      background: linear-gradient(135deg, var(--slate-blue) 0%, var(--mineral-blue) 100%);
+      color: white;
+      border-color: var(--mineral-blue);
+    }
+
+    .bot .message-content {
+      background: white;
+    }
+
+    .error .message-content { 
+      background: #FFF5F5;
+      color: var(--lava-red);
+      border-color: #FED7D7;
+    }
+
+    .typing-indicator {
+      display: flex;
+      gap: 5px;
+      padding: 6px 0;
+    }
+
+    .typing-indicator span {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--rock-gray);
+      animation: typing 1.4s infinite;
+    }
+
+    .typing-indicator span:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .typing-indicator span:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    @keyframes typing {
+      0%, 60%, 100% {
+        opacity: 0.3;
+        transform: translateY(0);
+      }
+      30% {
+        opacity: 1;
+        transform: translateY(-5px);
+      }
+    }
+
+    .input-container {
+      padding: 24px 36px 28px 36px;
+      background: white;
+      border-top: 3px solid var(--copper-accent);
+      display: flex;
+      gap: 14px;
+      align-items: flex-end;
+      position: relative;
+      z-index: 1;
+    }
+
+    #input {
+      flex: 1;
+      padding: 14px 18px;
+      border: 2px solid var(--rock-gray);
+      border-radius: 12px;
+      font-size: 16px;
+      font-family: 'Crimson Pro', serif;
+      outline: none;
+      transition: all 0.25s ease;
+      resize: none;
+      min-height: 50px;
+      max-height: 140px;
+      line-height: 1.6;
+      background: var(--quartz-white);
+    }
+
+    #input:focus {
+      border-color: var(--mineral-blue);
+      box-shadow: 0 0 0 4px rgba(44, 95, 124, 0.1);
+    }
+
+    #send-btn {
+      padding: 14px 28px;
+      background: linear-gradient(135deg, var(--slate-blue) 0%, var(--mineral-blue) 100%);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      font-family: 'Crimson Pro', serif;
+      transition: all 0.25s ease;
+      height: 50px;
+      white-space: nowrap;
+      box-shadow: var(--shadow-sm);
+    }
+
+    #send-btn:hover:not(:disabled) {
+      background: linear-gradient(135deg, var(--mineral-blue) 0%, var(--slate-blue) 100%);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow-md);
+    }
+
+    #send-btn:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    #send-btn:disabled {
+      background: var(--rock-gray);
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+
+    /* Empty State with Enhanced Suggestions */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--rock-gray);
+      text-align: center;
+      padding: 50px;
+    }
+
+    .empty-state-icon {
+      width: 100px;
+      height: 100px;
+      background: linear-gradient(135deg, var(--copper-accent) 0%, var(--fossil-amber) 100%);
+      border-radius: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 50px;
+      margin-bottom: 28px;
+      box-shadow: var(--shadow-md);
+      animation: float 3s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% {
+        transform: translateY(0);
+      }
+      50% {
+        transform: translateY(-10px);
+      }
+    }
+
+    .empty-state h2 {
+      font-size: 28px;
+      margin-bottom: 12px;
+      color: var(--granite-dark);
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .empty-state p {
+      font-size: 17px;
+      max-width: 500px;
+      line-height: 1.7;
+      color: var(--rock-gray);
+      margin-bottom: 8px;
+    }
+
+    .empty-state-subtitle {
+      font-size: 15px;
+      color: var(--mineral-blue);
+      font-weight: 600;
+      margin-top: 20px;
+      margin-bottom: 16px;
+    }
+
+    .suggestions {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
+      margin-top: 24px;
+      width: 100%;
+      max-width: 750px;
+    }
+
+    .suggestion-card {
+      background: white;
+      border: 2px solid var(--rock-gray);
+      border-radius: 12px;
+      padding: 16px 20px;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      text-align: left;
+      font-size: 15px;
+      color: var(--granite-dark);
+      line-height: 1.5;
+      position: relative;
+      overflow: hidden;
+      font-weight: 500;
+    }
+
+    .suggestion-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 4px;
+      height: 100%;
+      background: linear-gradient(135deg, var(--copper-accent) 0%, var(--fossil-amber) 100%);
+      opacity: 0;
+      transition: opacity 0.25s;
+    }
+
+    .suggestion-card:hover {
+      border-color: var(--mineral-blue);
+      background: white;
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-md);
+    }
+
+    .suggestion-card:hover::before {
+      opacity: 1;
+    }
+
+    .suggestion-icon {
+      font-size: 20px;
+      margin-right: 10px;
+    }
+
+    /* Image modal */
+    .image-modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.95);
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+      backdrop-filter: blur(4px);
+      padding: 20px;
+    }
+
+    .image-modal.active {
+      display: flex;
+      animation: fadeIn 0.3s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .image-modal img {
+      max-width: 95%;
+      max-height: 95%;
+      border-radius: 8px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+      object-fit: contain;
+      transition: transform 0.1s ease-out;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 30px;
+      right: 30px;
+      color: white;
+      font-size: 40px;
+      cursor: pointer;
+      width: 50px;
+      height: 50px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.7);
+      border-radius: 10px;
+      transition: all 0.2s;
+      z-index: 1001;
+      border: 2px solid rgba(255,255,255,0.2);
+    }
+
+    .modal-close:hover {
+      background: rgba(0,0,0,0.9);
+      border-color: rgba(255,255,255,0.4);
+      transform: rotate(90deg);
+    }
+
+    .modal-info {
+      position: absolute;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: white;
+      background: rgba(0,0,0,0.7);
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      text-align: center;
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    /* Connection status */
+    .connection-status {
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      display: none;
+      z-index: 1000;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .connection-status.error {
+      display: block;
+      background: #FFF5F5;
+      color: var(--lava-red);
+      border: 2px solid #FED7D7;
+      box-shadow: var(--shadow-md);
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        height: 100vh;
+        border-radius: 0;
+        max-width: 100%;
+      }
+
+      .header {
+        padding: 24px 20px;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 14px;
+        overflow: visible;
+      }
+
+      .header-left {
+        width: 100%;
+      }
+
+      .header-controls {
+        width: 100%;
+        flex-wrap: wrap;
+      }
+
+      .icon-btn {
+        flex: 1;
+        min-width: 110px;
+        justify-content: center;
+      }
+
+      .header h1 {
+        font-size: 26px;
+      }
+
+      .header p {
+        margin-left: 52px;
+        font-size: 14px;
+      }
+
+      .chat-wrapper {
+        overflow: hidden;
+      }
+
+      #chat {
+        padding: 20px;
+      }
+
+      .input-container {
+        padding: 20px;
+      }
+
+      .message {
+        max-width: 92%;
+      }
+
+      .suggestions {
+        grid-template-columns: 1fr;
+      }
+
+      .empty-state {
+        padding: 30px 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="connection-status" id="connection-status"></div>
+  
+  <div class="header">
+    <div class="header-left">
+      <h1>
+        <div class="header-icon">🪨</div>
+        Rocky
+      </h1>
+      <p>Your expert guide to Earth sciences and Geology</p>
+    </div>
+    <div class="header-controls">
+      <button class="icon-btn" onclick="newChat()">
+        <span>✨</span>
+        <span class="btn-text" data-lang-key="newChat">New Chat</span>
+      </button>
+      <div class="language-selector">
+        <button class="icon-btn" onclick="toggleLanguageMenu()">
+          <span>🌐</span>
+          <span id="current-lang">EN</span>
+        </button>
+        <div class="lang-dropdown" id="lang-dropdown">
+          <div class="lang-option" onclick="changeLanguage('en')">
+            <span>🇬🇧</span>
+            <span>English</span>
+          </div>
+          <div class="lang-option" onclick="changeLanguage('es')">
+            <span>🇪🇸</span>
+            <span>Español</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="chat-wrapper">
+    <div id="chat">
+      <div class="empty-state">
+        <div class="empty-state-icon">💎</div>
+        <h2 data-lang-key="welcomeTitle">Welcome to Rocky</h2>
+        <p data-lang-key="welcomeText">Your AI companion for exploring the fascinating world of Geology, minerals, and Earth Sciences.</p>
+        <div class="empty-state-subtitle" data-lang-key="suggestionsTitle">🌍 Popular Topics to Explore</div>
+        <div class="suggestions" id="suggestions-container">
+          <!-- Will be populated by JavaScript -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="input-container">
+    <textarea id="input" data-lang-key-placeholder="inputPlaceholder" autocomplete="off" rows="1"></textarea>
+    <button id="send-btn" onclick="send()" data-lang-key="sendButton">Send</button>
+  </div>
+</div>
+
+<!-- Image Modal -->
+<div class="image-modal" id="image-modal">
+  <div class="modal-close" onclick="closeImageModal(event)">&times;</div>
+  <img id="modal-image" src="" alt="Geological Illustration" onclick="event.stopPropagation()">
+  <div class="modal-info">
+    <span>🔍 Click and drag to pan • Scroll to zoom • Press ESC or click background to close</span>
+  </div>
+</div>
+
+<script>
+let thread_id = null;
+const API_URL = "https://geology-agent.onrender.com/chat";
+let isConnecting = false;
+let connectionRetries = 0;
+const MAX_RETRIES = 3;
+let currentLanguage = 'en';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TRANSLATIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+const translations = {
+  en: {
+    newChat: "New Chat",
+    sendButton: "Send",
+    inputPlaceholder: "Ask about geology, rocks, minerals, fossils...",
+    welcomeTitle: "Welcome to Rocky",
+    welcomeText: "Your AI companion for exploring the fascinating world of geology, minerals, and Earth sciences.",
+    suggestionsTitle: "🌍 Popular Topics to Explore",
+    suggestions: [
+      { icon: "🏔️", text: "I want to know more about tectonic plates" },
+      { icon: "🪨", text: "Let's talk about the 3 main types of rocks" },
+      { icon: "💎", text: "How are minerals identified and classified?" },
+      { icon: "🌋", text: "Explain how volcanoes form and erupt" },
+      { icon: "🦴", text: "Tell me about fossils and paleontology" },
+      { icon: "⛰️", text: "What causes earthquakes and how are they measured?" }
+    ]
+  },
+  es: {
+    newChat: "Nuevo Chat",
+    sendButton: "Enviar",
+    inputPlaceholder: "Pregunta sobre geología, rocas, minerales, fósiles...",
+    welcomeTitle: "Bienvenido a Rocky",
+    welcomeText: "Tu compañero de IA para explorar el fascinante mundo de la geología, minerales y ciencias de la Tierra.",
+    suggestionsTitle: "🌍 Temas Populares para Explorar",
+    suggestions: [
+      { icon: "🏔️", text: "Quiero saber más sobre las placas tectónicas" },
+      { icon: "🪨", text: "Hablemos de los 3 tipos principales de rocas" },
+      { icon: "💎", text: "¿Cómo se identifican y clasifican los minerales?" },
+      { icon: "🌋", text: "Explica cómo se forman y erupcionan los volcanes" },
+      { icon: "🦴", text: "Cuéntame sobre los fósiles y la paleontología" },
+      { icon: "⛰️", text: "¿Qué causa los terremotos y cómo se miden?" }
+    ]
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LANGUAGE FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function toggleLanguageMenu() {
+  const dropdown = document.getElementById('lang-dropdown');
+  const button = event.target.closest('.icon-btn');
+  
+  if (dropdown.classList.contains('active')) {
+    dropdown.classList.remove('active');
+    document.removeEventListener('click', closeLanguageMenuOutside);
+  } else {
+    // Position dropdown below the button
+    const rect = button.getBoundingClientRect();
+    dropdown.style.top = (rect.bottom + 8) + 'px';
+    dropdown.style.right = (window.innerWidth - rect.right) + 'px';
+    
+    dropdown.classList.add('active');
+    
+    // Close on click outside
+    setTimeout(() => {
+      document.addEventListener('click', closeLanguageMenuOutside);
+    }, 0);
+  }
+}
+
+function closeLanguageMenuOutside(e) {
+  const dropdown = document.getElementById('lang-dropdown');
+  const selector = document.querySelector('.language-selector');
+  
+  if (!selector.contains(e.target)) {
+    dropdown.classList.remove('active');
+    document.removeEventListener('click', closeLanguageMenuOutside);
+  }
+}
+
+function changeLanguage(lang) {
+  currentLanguage = lang;
+  document.getElementById('current-lang').textContent = lang.toUpperCase();
+  document.getElementById('lang-dropdown').classList.remove('active');
+  
+  // Update all text elements
+  updateTranslations();
+  
+  // Update active state in dropdown
+  document.querySelectorAll('.lang-option').forEach(opt => {
+    opt.classList.remove('active');
+  });
+  event.target.closest('.lang-option').classList.add('active');
+}
+
+function updateTranslations() {
+  const t = translations[currentLanguage];
+  
+  // Update elements with data-lang-key
+  document.querySelectorAll('[data-lang-key]').forEach(el => {
+    const key = el.getAttribute('data-lang-key');
+    if (t[key]) {
+      el.textContent = t[key];
+    }
+  });
+  
+  // Update placeholder
+  const input = document.getElementById('input');
+  const placeholderKey = input.getAttribute('data-lang-key-placeholder');
+  if (placeholderKey && t[placeholderKey]) {
+    input.placeholder = t[placeholderKey];
+  }
+  
+  // Update suggestions
+  const suggestionsContainer = document.getElementById('suggestions-container');
+  if (suggestionsContainer && t.suggestions) {
+    suggestionsContainer.innerHTML = t.suggestions.map(s => 
+      `<div class="suggestion-card" onclick="sendSuggestion('${s.text.replace(/'/g, "\\'")}')">
+        <span class="suggestion-icon">${s.icon}</span>
+        ${s.text}
+      </div>`
+    ).join('');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTO-RESIZE TEXTAREA
+// ═══════════════════════════════════════════════════════════════════════════
+
+const input = document.getElementById("input");
+input.addEventListener("input", function() {
+  this.style.height = "auto";
+  this.style.height = Math.min(this.scrollHeight, 140) + "px";
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTENT RENDERING WITH MARKDOWN SUPPORT
+// ═══════════════════════════════════════════════════════════════════════════
+
+function renderContent(container, text) {
+  const imageRegex = /!\[([^\]]*)\]\((https?:\/\/[^\)]+)\)/g;
+  
+  container.innerHTML = '';
+  let lastIndex = 0;
+  let match;
+  const images = [];
+
+  // First, extract all images
+  while ((match = imageRegex.exec(text)) !== null) {
+    images.push({
+      index: match.index,
+      endIndex: imageRegex.lastIndex,
+      url: match[2],
+      alt: match[1]
+    });
+  }
+
+  // Now render text and images in order
+  images.forEach((img, i) => {
+    // Add text before this image
+    const textBefore = text.slice(lastIndex, img.index);
+    if (textBefore.trim()) {
+      const span = document.createElement('span');
+      span.className = 'text-part';
+      span.innerHTML = renderMarkdown(textBefore);
+      container.appendChild(span);
+    }
+
+    // Add the image
+    const imgEl = document.createElement('img');
+    imgEl.src = img.url;
+    imgEl.alt = img.alt || 'Geological Illustration';
+    imgEl.title = 'Click to zoom';
+    imgEl.loading = 'lazy';
+    imgEl.onclick = (e) => {
+      e.stopPropagation();
+      openImageModal(img.url);
+    };
+    container.appendChild(imgEl);
+
+    lastIndex = img.endIndex;
+  });
+
+  // Add any remaining text after the last image
+  const textAfter = text.slice(lastIndex);
+  if (textAfter.trim()) {
+    const span = document.createElement('span');
+    span.className = 'text-part';
+    span.innerHTML = renderMarkdown(textAfter);
+    container.appendChild(span);
+  }
+}
+
+function renderMarkdown(text) {
+  // Escape HTML first
+  text = escapeHtml(text);
+  
+  // Bold: **text** or __text__
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/__(.+?)__/g, '<strong>$1</strong>');
+  
+  // Italic: *text* or _text_ (but not in the middle of words)
+  text = text.replace(/\*([^\*\s][^\*]*?)\*/g, '<em>$1</em>');
+  text = text.replace(/_([^_\s][^_]*?)_/g, '<em>$1</em>');
+  
+  // Inline code: `code`
+  text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+  
+  // Links: [text](url) - but NOT image links
+  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  
+  // Line breaks
+  text = text.replace(/\n/g, '<br>');
+  
+  return text;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// IMAGE MODAL WITH ZOOM AND PAN
+// ═══════════════════════════════════════════════════════════════════════════
+
+let modalZoom = 1;
+let modalPanning = false;
+let modalPanStart = { x: 0, y: 0 };
+let modalPanOffset = { x: 0, y: 0 };
+
+function openImageModal(src) {
+  const modal = document.getElementById("image-modal");
+  const modalImg = document.getElementById("modal-image");
+  
+  // Reset zoom and pan
+  modalZoom = 1;
+  modalPanOffset = { x: 0, y: 0 };
+  
+  modalImg.src = src;
+  modalImg.style.transform = 'scale(1) translate(0, 0)';
+  modal.classList.add("active");
+  
+  // Enable zoom with mouse wheel
+  modalImg.onwheel = (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    modalZoom *= delta;
+    modalZoom = Math.max(0.5, Math.min(modalZoom, 5)); // Limit zoom between 0.5x and 5x
+    updateModalTransform();
+  };
+  
+  // Enable pan with mouse drag
+  modalImg.onmousedown = (e) => {
+    if (modalZoom > 1) {
+      modalPanning = true;
+      modalPanStart = { x: e.clientX - modalPanOffset.x, y: e.clientY - modalPanOffset.y };
+      modalImg.style.cursor = 'grabbing';
+      e.preventDefault();
+    }
+  };
+  
+  document.onmousemove = (e) => {
+    if (modalPanning) {
+      modalPanOffset = {
+        x: e.clientX - modalPanStart.x,
+        y: e.clientY - modalPanStart.y
+      };
+      updateModalTransform();
+    }
+  };
+  
+  document.onmouseup = () => {
+    if (modalPanning) {
+      modalPanning = false;
+      if (modalZoom > 1) {
+        modalImg.style.cursor = 'grab';
+      }
+    }
+  };
+  
+  // Update cursor based on zoom
+  modalImg.style.cursor = modalZoom > 1 ? 'grab' : 'default';
+  
+  // Click background to close
+  modal.onclick = (e) => {
+    if (e.target === modal) {
+      closeImageModal();
+    }
+  };
+}
+
+function updateModalTransform() {
+  const modalImg = document.getElementById("modal-image");
+  modalImg.style.transform = `scale(${modalZoom}) translate(${modalPanOffset.x / modalZoom}px, ${modalPanOffset.y / modalZoom}px)`;
+  modalImg.style.cursor = modalZoom > 1 ? 'grab' : 'default';
+}
+
+function closeImageModal(event) {
+  if (event) {
+    event.stopPropagation();
+  }
+  const modal = document.getElementById("image-modal");
+  const modalImg = document.getElementById("modal-image");
+  modal.classList.remove("active");
+  
+  // Clean up event listeners
+  modalImg.onwheel = null;
+  modalImg.onmousedown = null;
+  document.onmousemove = null;
+  document.onmouseup = null;
+  modal.onclick = null;
+  
+  // Reset state
+  modalZoom = 1;
+  modalPanning = false;
+  modalPanOffset = { x: 0, y: 0 };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONNECTION STATUS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function showConnectionError(message) {
+  const status = document.getElementById("connection-status");
+  status.textContent = message;
+  status.className = "connection-status error";
+}
+
+function hideConnectionError() {
+  const status = document.getElementById("connection-status");
+  status.style.display = "none";
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NEW CHAT
+// ═══════════════════════════════════════════════════════════════════════════
+
+function newChat() {
+  thread_id = null;
+  connectionRetries = 0;
+  hideConnectionError();
+  
+  const t = translations[currentLanguage];
+  const chat = document.getElementById("chat");
+  
+  const suggestionsHTML = t.suggestions.map(s => 
+    `<div class="suggestion-card" onclick="sendSuggestion('${s.text.replace(/'/g, "\\'")}')">
+      <span class="suggestion-icon">${s.icon}</span>
+      ${s.text}
+    </div>`
+  ).join('');
+  
+  chat.innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state-icon">💎</div>
+      <h2>${t.welcomeTitle}</h2>
+      <p>${t.welcomeText}</p>
+      <div class="empty-state-subtitle">${t.suggestionsTitle}</div>
+      <div class="suggestions">
+        ${suggestionsHTML}
+      </div>
+    </div>
+  `;
+  
+  const input = document.getElementById("input");
+  input.value = "";
+  input.style.height = "auto";
+  input.focus();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SEND MESSAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+function sendSuggestion(text) {
+  const input = document.getElementById("input");
+  input.value = text;
+  send();
+}
+
+async function send() {
+  if (isConnecting) return;
+  
+  const input = document.getElementById("input");
+  const chat = document.getElementById("chat");
+  const sendBtn = document.getElementById("send-btn");
+  const message = input.value.trim();
+  
+  if (!message) return;
+  
+  if (message.length > 10000) {
+    alert("Message is too long. Please keep it under 10,000 characters.");
+    return;
+  }
+  
+  // Add language context to message
+  const languageNote = currentLanguage === 'es' ? 
+    '\n\n[Nota: Por favor responde en español]' : '';
+  const fullMessage = message + languageNote;
+  
+  const emptyState = chat.querySelector('.empty-state');
+  if (emptyState) emptyState.remove();
+  
+  input.value = "";
+  input.style.height = "auto";
+  input.disabled = true;
+  sendBtn.disabled = true;
+  isConnecting = true;
+  
+  const userMsg = document.createElement('div');
+  userMsg.className = 'message user';
+  userMsg.innerHTML = `
+    <div class="message-avatar">U</div>
+    <div class="message-content">${escapeHtml(message)}</div>
+  `;
+  chat.appendChild(userMsg);
+  chat.scrollTop = chat.scrollHeight;
+  
+  const botMsg = document.createElement('div');
+  botMsg.className = 'message bot';
+  botMsg.innerHTML = `
+    <div class="message-avatar">🪨</div>
+    <div class="message-content">
+      <div class="typing-indicator">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </div>
+  `;
+  chat.appendChild(botMsg);
+  chat.scrollTop = chat.scrollHeight;
+  
+  const responseContent = botMsg.querySelector('.message-content');
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ message: fullMessage, thread_id }),
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!res.ok) {
+      let errorMessage = `Server error (${res.status})`;
+      
+      if (res.status === 429) {
+        errorMessage = currentLanguage === 'es' ? 
+          "Demasiadas solicitudes. Por favor espera un momento." :
+          "Too many requests. Please wait a moment.";
+      } else if (res.status >= 500) {
+        errorMessage = currentLanguage === 'es' ?
+          "El servidor tiene problemas. Inténtalo más tarde." :
+          "Server is experiencing issues. Please try again later.";
+      }
+      
+      throw new Error(errorMessage);
+    }
+
+    responseContent.innerHTML = '';
+    hideConnectionError();
+    connectionRetries = 0;
+    
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let fullText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6).trim();
+          
+          if (data === '[DONE]') continue;
+          
+          try {
+            const parsed = JSON.parse(data);
+            
+            if (parsed.thread_id) {
+              thread_id = parsed.thread_id;
+            } else if (parsed.content) {
+              fullText += parsed.content;
+              renderContent(responseContent, fullText);
+              chat.scrollTop = chat.scrollHeight;
+            } else if (parsed.error) {
+              throw new Error(parsed.error);
+            }
+          } catch (e) {
+            if (e.message !== "Unexpected end of JSON input") {
+              console.warn("Could not parse:", data, e);
+            }
+          }
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      try {
+        const parsed = JSON.parse(buffer);
+        if (parsed.content) {
+          fullText += parsed.content;
+          renderContent(responseContent, fullText);
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    
+    if (!fullText.trim()) {
+      throw new Error(currentLanguage === 'es' ? 
+        "No se recibió respuesta del servidor" :
+        "No response received from server");
+    }
+    
+  } catch (error) {
+    console.error("Full error:", error);
+    
+    let errorMessage = error.message;
+    
+    if (error.name === 'AbortError') {
+      errorMessage = currentLanguage === 'es' ?
+        "Tiempo de espera agotado. Inténtalo con un mensaje más corto." :
+        "Request timed out. Please try with a shorter message.";
+    } else if (!navigator.onLine) {
+      errorMessage = currentLanguage === 'es' ?
+        "Sin conexión a internet. Verifica tu red." :
+        "No internet connection. Please check your network.";
+    }
+    
+    botMsg.className = 'message error';
+    botMsg.innerHTML = `
+      <div class="message-avatar">!</div>
+      <div class="message-content">
+        <strong>Error:</strong> ${escapeHtml(errorMessage)}
+      </div>
+    `;
+    
+    if (connectionRetries < MAX_RETRIES) {
+      connectionRetries++;
+      const retryMsg = currentLanguage === 'es' ?
+        `Problema de conexión (intento ${connectionRetries}/${MAX_RETRIES})` :
+        `Connection issue (attempt ${connectionRetries}/${MAX_RETRIES})`;
+      showConnectionError(retryMsg);
+    } else {
+      const finalMsg = currentLanguage === 'es' ?
+        "No se puede conectar. Verifica el estado de la API." :
+        "Unable to connect. Please check the API status.";
+      showConnectionError(finalMsg);
+    }
+    
+  } finally {
+    input.disabled = false;
+    sendBtn.disabled = false;
+    isConnecting = false;
+    input.focus();
+    chat.scrollTop = chat.scrollHeight;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UTILITY FUNCTIONS
+// ═══════════════════════════════════════════════════════════════════════════
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EVENT LISTENERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+input.addEventListener("keypress", function(e) {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+
+document.addEventListener("keydown", function(e) {
+  if (e.key === "Escape") {
+    closeImageModal();
+    document.getElementById('lang-dropdown').classList.remove('active');
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INITIALIZATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+window.addEventListener('DOMContentLoaded', () => {
+  updateTranslations();
+  input.focus();
+});
+</script>
+
+</body>
+</html>
+
+
