@@ -35,9 +35,9 @@ Thumbs.db
 *.sqlite
 *.sqlite3
 
-# ALLOW the geology knowledge base files
-!geology_kb/*.db
-!geology_kb/**/*.db
+# The geology knowledge base (build,locally)
+geology_kb/
+geology_kb/
 
 # Logs
 *.log
