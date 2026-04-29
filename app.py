@@ -1,9 +1,14 @@
+# Import libraries 
 from fastapi import FastAPI, HTTPException, Request
+# to send tokens by one by one-> StreamingReponse
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+# pydantic is the data validation layer 
 from pydantic import BaseModel, Field, validator
+# genrates unique IDs for conversation threaths 
 import uuid
 import json
+# makes everything asynchornous (handles multiple users at the same time)
 import asyncio
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -27,11 +32,13 @@ app = FastAPI(
 # ═══════════════════════════════════════════════════════════════════════════
 
 class RateLimiter:
+    # how many times each IP address hits the API within a time window 
     def __init__(self, max_requests: int = 20, window_seconds: int = 60):
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.requests = defaultdict(list)
-    
+
+    # if they haven't hit the limit, it logs their timestamps and lets them through 
     def is_allowed(self, client_id: str) -> bool:
         now = datetime.now()
         cutoff = now - timedelta(seconds=self.window_seconds)
@@ -58,7 +65,8 @@ rate_limiter = RateLimiter(max_requests=20, window_seconds=60)
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=10000)
     thread_id: str | None = Field(None, description="Optional conversation thread ID")
-    
+
+    # it returns an error if the message is empty or it only contains whitespaces
     @validator('message')
     def validate_message(cls, v):
         if not v.strip():
@@ -91,7 +99,7 @@ def read_root():
             "health": "/health"
         }
     }
-
+# to know if the service is running 
 @app.get("/health")
 def health_check():
     return {
@@ -116,7 +124,7 @@ async def chat(req: ChatRequest, request: Request):
             status_code=429,
             detail="Too many requests. Please try again later."
         )
-    
+    # if the user sent a thread_id, use it, if not, generate a new one
     thread_id = req.thread_id or str(uuid.uuid4())
     
     logger.info(f"Chat request - Thread: {thread_id}, IP: {client_ip}")
