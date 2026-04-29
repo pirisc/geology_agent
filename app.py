@@ -37,7 +37,6 @@ class RateLimiter:
         self.max_requests = max_requests
         self.window_seconds = window_seconds
         self.requests = defaultdict(list)
-
     # if they haven't hit the limit, it logs their timestamps and lets them through 
     def is_allowed(self, client_id: str) -> bool:
         now = datetime.now()
@@ -65,7 +64,6 @@ rate_limiter = RateLimiter(max_requests=20, window_seconds=60)
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=10000)
     thread_id: str | None = Field(None, description="Optional conversation thread ID")
-
     # it returns an error if the message is empty or it only contains whitespaces
     @validator('message')
     def validate_message(cls, v):
