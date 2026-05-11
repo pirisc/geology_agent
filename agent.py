@@ -9,6 +9,7 @@ from typing import Annotated, AsyncGenerator, TypedDict
 from bs4 import BeautifulSoup
 from dotenv import find_dotenv, load_dotenv
 import requests
+import psycopg
 
 # 3. LangChain & LangGraph
 from langchain.tools import tool
@@ -356,21 +357,16 @@ class State(TypedDict):
 db_url = os.getenv('DATABASE_URL')
 
 if db_url:
-    # Production: Use Render's PostgreSQL
     if db_url.startswith("postgres://"):
         db_url = db_url.replace("postgres://", "postgresql://", 1)
     
     try:
-        # Create the checkpointer
-        checkpointer = PostgresSaver.from_conn_string(db_url)
-        
-        # Setup the database tables
+        conn = psycopg.connect(db_url)
+        checkpointer = PostgresSaver(conn)
         checkpointer.setup()
-        
         logger.info('✓ Using PostgreSQL checkpointer')
     except Exception as e:
         logger.error(f"PostgreSQL setup failed: {e}")
-        # Fallback to memory saver
         checkpointer = MemorySaver()
         logger.warning("⚠️ Falling back to MemorySaver (no persistence)")
 
